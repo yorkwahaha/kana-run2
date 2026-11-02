@@ -1,0 +1,48 @@
+{
+  "speed": {
+    "max_speed_kmh": 60.0,
+    "accel_time_s": 3.0,
+    "brake_time_s": 1.2,
+    "coast_time_s": 5.0,
+    "double_tap_window_s": 0.28,
+    "wrong_hit_speed_factor": 0.5
+  },
+  "lanes": {
+    "count": 3,
+    "lane_width_m": 2.2,
+    "lane_change_time_s": 0.16,
+    "swipe_min_px": 40,
+    "player_width_m": 0.9,
+    "stone_width_m": 1.2,
+    "keyboard_lane_change_requires_hold": false
+  },
+  "track": {
+    "row_spacing_m": 24.0,
+    "first_row_m": 30.0,
+    "spawn_ahead_m": 80.0
+  },
+  "feedback": {
+    "screen_shake_on_normal_hit": false,
+    "glow_strength": 4.0,
+    "knockback_distance_m": 7.0,
+    "fov_punch_deg": 4.0,
+    "music": "res://audio/music/dash.mp3",
+    "music_volume_db": -12.0
+  },
+  "dev": {
+    "timing_mode": false
+  },
+  "levels": {
+    "level_01": {
+      "name": "Level 1  あ行",
+      "kana": ["あ", "い", "う", "え", "お"],
+      "romaji": ["a", "i", "u", "e", "o"],
+      "target_correct": 20,
+      "time_limit_s": 60.0,
+      "star2_s": 44.0,
+      "star3_s": 32.0,
+      "wrong_penalty_s": 2.0,
+      "miss_penalty_s": 1.0
+    }
+  }
+}
