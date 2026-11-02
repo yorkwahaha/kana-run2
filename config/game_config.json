@@ -4,7 +4,10 @@
     "accel_time_s": 3.0,
     "brake_time_s": 1.2,
     "coast_time_s": 5.0,
-    "wrong_hit_speed_factor": 0.5
+    "wrong_hit_speed_factor": 0.5,
+    "default_mode": "race",
+    "step_kmh": 5.0,
+    "step_wrong_halves_target": true
   },
   "lanes": {
     "count": 3,

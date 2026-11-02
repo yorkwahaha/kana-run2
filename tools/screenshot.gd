@@ -18,7 +18,7 @@ func _initialize() -> void:
 	g.save_path = "user://screenshot_save.json"
 	root.add_child(g)
 	for sz in SIZES:
-		for scr in ["select", "run", "pause", "results"]:
+		for scr in ["select", "settings", "run", "run_step", "pause", "results"]:
 			steps.append([sz, scr])
 
 func _process(_d: float) -> bool:
@@ -33,8 +33,12 @@ func _process(_d: float) -> bool:
 			"select": g.show_select()
 			"ready": g.set_level(0); g.reset_run()
 			"run":
-				g.reset_run(); g.start_run()
+				g.set_speed_mode("race", false); g.reset_run(); g.start_run(); g.ctrl.speed = 11.0; g.ctrl.toggle_lock()
 				g.lbl_notice.text = "聽音模式"; g.correct = 12; g._set_combo(12); g.ctrl.press(); g.ctrl.speed = 12.0
+			"settings":
+				g.show_select(); g.show_settings()
+			"run_step":
+				g.set_speed_mode("step", false); g.reset_run(); g.start_run(); g.ctrl.tap_up(); g.ctrl.tap_up(); g.ctrl.speed = 3.0
 			"pause":
 				g.reset_run(); g.start_run(); g.pause_game()
 			"results":

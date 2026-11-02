@@ -76,6 +76,16 @@ var spawn_ahead := 80.0
 ## index -> {"role": "accel"|"brake"|"swipe", "anchor": Vector2}
 var touches := {}
 var pause_count := 0
+## "race" (賽車) or "step" (點放). Saved in save.json settings. Tests may force it.
+var speed_mode := "race"
+var force_mode := ""
+var btn_lock: Panel
+var btn_mode_pause: Button
+var settings_box: Control
+var btn_settings: Button
+var btn_mode_race: Button
+var btn_mode_step: Button
+var btn_settings_back: Button
 # HP
 var hp := 3
 var max_hp := 3
@@ -149,6 +159,8 @@ func _ready() -> void:
 	_build_hud()
 	_build_audio()
 	_setup_web_visibility()
+	var m: String = force_mode if force_mode != "" else str(save.get_setting("speed_mode", cfg.get("speed", {}).get("default_mode", "race")))
+	set_speed_mode(m, false)
 	set_level(level_index)
 	reset_run()
 	if not skip_select:
@@ -291,8 +303,8 @@ func _build_hud() -> void:
 	lbl_shield = _label(34)
 	lbl_shield.add_theme_color_override("font_color", Color(0.6, 0.85, 1.0))
 	lbl_shield.reparent(hearts_box)
-	lbl_speed = _label(36, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_speed, 0.5, 1, 0.5, 1, -170, -90, 170, -36)
-	lbl_combo = _label(52, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_combo, 0.5, 1, 0.5, 1, -200, -170, 200, -100)
+	lbl_speed = _label(28, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_speed, 0.5, 1, 0.5, 1, -115, -90, 115, -36)
+	lbl_combo = _label(52, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_combo, 0.5, 1, 0.5, 1, -115, -170, 115, -100)
 	lbl_combo.add_theme_color_override("font_color", Color(1.0, 0.75, 0.3))
 	lbl_hint = _label(96, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_hint, 0, 0, 1, 0, 0, 130, 0, 250)
 	lbl_hint.add_theme_color_override("font_color", Color(1.0, 0.95, 0.6))
@@ -309,6 +321,8 @@ func _build_hud() -> void:
 	btn_accel = _touch_button("加速", 48, Color(0.3, 0.85, 0.5)); _place(btn_accel, 1, 1, 1, 1, -264, -284, -24, -44)
 	btn_pause = _touch_button("II", 40, Color(0.7, 0.7, 0.9)); _place(btn_pause, 1, 0, 1, 0, -120, 16, -24, 112)
 	btn_voice = _touch_button("重播", 30, Color(1.0, 0.85, 0.4)); _place(btn_voice, 1, 0, 1, 0, -120, 124, -24, 220)
+	btn_lock = _touch_button("鎖定", 34, Color(0.4, 0.8, 1.0)); _place(btn_lock, 1, 1, 1, 1, -200, -430, -64, -294)
+	_layout_touch()
 	# pause menu
 	var pm := _panel_center()
 	pause_box = pm[0]
@@ -319,13 +333,36 @@ func _build_hud() -> void:
 	pt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pm[1].add_child(pt)
 	btn_resume = _button("繼續"); btn_restart = _button("重來"); btn_quit = _button("回選關")
-	for b in [btn_resume, btn_restart, btn_quit]:
+	btn_mode_pause = _button("")
+	for b in [btn_resume, btn_restart, btn_mode_pause, btn_quit]:
 		b.custom_minimum_size = Vector2(320, 80)
 		pm[1].add_child(b)
 	btn_resume.pressed.connect(resume)
 	btn_restart.pressed.connect(func(): reset_run())
 	btn_quit.pressed.connect(show_select)
+	btn_mode_pause.pressed.connect(func(): set_speed_mode("step" if speed_mode == "race" else "race"))
 	pause_box.visible = false
+	# settings
+	var st := _panel_center()
+	settings_box = st[0]
+	var stl := Label.new()
+	stl.text = "設定：速度模式"
+	stl.add_theme_font_override("font", Assets.FONT_HUD)
+	stl.add_theme_font_size_override("font_size", 44)
+	stl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	st[1].add_child(stl)
+	btn_mode_race = _button("賽車模式：按住加速／煞車，可鎖定速度")
+	btn_mode_step = _button("點放模式：點一下 ±5 km/h")
+	btn_settings_back = _button("返回")
+	for b in [btn_mode_race, btn_mode_step, btn_settings_back]:
+		b.custom_minimum_size = Vector2(560, 80)
+		b.add_theme_font_size_override("font_size", 30)
+		b.toggle_mode = b != btn_settings_back
+		st[1].add_child(b)
+	btn_mode_race.pressed.connect(func(): set_speed_mode("race"))
+	btn_mode_step.pressed.connect(func(): set_speed_mode("step"))
+	btn_settings_back.pressed.connect(func(): settings_box.visible = false; select_box.visible = true)
+	settings_box.visible = false
 	# results
 	var r := _panel_center()
 	results_box = r[0]
@@ -460,6 +497,7 @@ func pause_game() -> void:
 	state = State.PAUSED
 	pause_count += 1
 	_release_inputs()
+	lbl_hint.visible = false
 	voice.stream_paused = true
 	music.stream_paused = true
 	pause_box.visible = true
@@ -469,6 +507,7 @@ func resume() -> void:
 		return
 	_release_inputs()
 	pause_box.visible = false
+	lbl_hint.visible = true
 	voice.stream_paused = false
 	music.stream_paused = false
 	state = State.RUNNING
@@ -499,7 +538,59 @@ func _on_js_visibility(_args) -> void:
 	if doc != null and doc.hidden:
 		_notification(NOTIFICATION_APPLICATION_FOCUS_OUT)
 
+## Speed mode switch. Works mid-run (see SpeedController.set_mode) and is saved.
+func set_speed_mode(m: String, persist := true) -> void:
+	if m != "race" and m != "step":
+		m = "race"
+	speed_mode = m
+	ctrl.set_mode(m)
+	touches.clear()
+	if persist:
+		save.set_setting("speed_mode", m)
+		save.save_file()
+	_refresh_mode_buttons()
+
+func mode_name(m := "") -> String:
+	return "點放" if (m if m != "" else speed_mode) == "step" else "賽車"
+
+func _refresh_mode_buttons() -> void:
+	if btn_mode_pause == null:
+		return
+	btn_mode_pause.text = "模式：%s ⇄ %s" % [mode_name(), mode_name("race" if speed_mode == "step" else "step")]
+	btn_mode_race.button_pressed = speed_mode == "race"
+	btn_mode_step.button_pressed = speed_mode == "step"
+	if btn_settings != null and is_instance_valid(btn_settings):
+		btn_settings.text = "設定（%s模式）" % mode_name()
+
+func show_settings() -> void:
+	select_box.visible = false
+	settings_box.visible = true
+	_refresh_mode_buttons()
+
+## Touch buttons scale with the short side of the (stretched) canvas so they stay
+## comfortably large in portrait and landscape.
+func _layout_touch() -> void:
+	var vs: Vector2 = get_viewport().get_visible_rect().size
+	var m := minf(vs.x, vs.y)
+	var a := m * 0.28      # accel
+	var b := m * 0.24      # brake
+	var l := m * 0.17      # lock
+	var t := m * 0.13      # pause / voice
+	var g := m * 0.035     # margin
+	_place(btn_accel, 1, 1, 1, 1, -g - a, -g - a, -g, -g)
+	_place(btn_brake, 0, 1, 0, 1, g, -g - b, g + b, -g)
+	# lock sits above the accel button, right-aligned, with a gap (outside accel/brake)
+	_place(btn_lock, 1, 1, 1, 1, -g - l, -g - a - g - l, -g, -g - a - g)
+	_place(btn_pause, 1, 0, 1, 0, -g - t, g, -g, g + t)
+	_place(btn_voice, 1, 0, 1, 0, -g - t, g + t + g * 0.6, -g, g + t + g * 0.6 + t)
+	for p in [btn_accel, btn_brake, btn_lock, btn_pause, btn_voice]:
+		var lab: Label = p.get_child(0)
+		lab.add_theme_font_size_override("font_size", int(p.size.y * (0.22 if p == btn_lock or p == btn_voice else 0.2)) if p.size.y > 0 else 32)
+		var sb: StyleBoxFlat = p.get_theme_stylebox("panel")
+		sb.set_corner_radius_all(int(m))
+
 func show_select() -> void:
+	settings_box.visible = false
 	pause_box.visible = false
 	voice.stream_paused = false
 	music.stream_paused = false
@@ -536,6 +627,11 @@ func show_select() -> void:
 		b.pressed.connect(choose_level.bind(i))
 		select_list.add_child(b)
 		level_buttons.append(b)
+	btn_settings = _button("")
+	btn_settings.custom_minimum_size = Vector2(480, 72)
+	btn_settings.pressed.connect(show_settings)
+	select_list.add_child(btn_settings)
+	_refresh_mode_buttons()
 	select_box.visible = true
 
 func choose_level(i: int) -> void:
@@ -606,7 +702,9 @@ func reset_run() -> void:
 	state = State.READY
 	results_box.visible = false
 	select_box.visible = false
+	settings_box.visible = false
 	pause_box.visible = false
+	lbl_hint.visible = true
 	voice.stream_paused = false
 	music.stream_paused = false
 	touches.clear()
@@ -749,7 +847,10 @@ func _process(dt: float) -> void:
 
 func _tick(dt: float) -> void:
 	if autopilot:
-		ctrl.holding = true
+		if speed_mode == "step":
+			if ctrl.target < ctrl.max_speed: ctrl.tap_up()
+		else:
+			ctrl.holding = true
 		var ar = active_row()
 		if ar != null:
 			lane = ar.target
@@ -819,21 +920,22 @@ func _finish(cleared: bool, reason := "") -> void:
 	if cleared:
 		new_best = save.record(level_id, stars, clock())
 		save.save_file()
-		lbl_result.text = "CLEAR!\n%s\n\nTime %.2f s\n(run %.2f + penalty %.1f)\nwrong %d   miss %d\nbest combo %d%s" % [
-			_stars_text(stars), clock(), elapsed, penalty, wrong, missed, best_combo, "\n新紀錄！" if new_best else ""]
+		lbl_result.text = "CLEAR!\n%s\n\nTime %.2f s\n(run %.2f + penalty %.1f)\nwrong %d   miss %d\nbest combo %d\n%s模式%s" % [
+			_stars_text(stars), clock(), elapsed, penalty, wrong, missed, best_combo, mode_name(), "\n新紀錄！" if new_best else ""]
 		sfx("shatter", 0.8, 2.0)
 	else:
-		lbl_result.text = "%s\n%d / %d" % ["體力耗盡" if fail_reason == "hp_out" else "時間到", correct, int(lvl.get("target_correct", 20))]
+		lbl_result.text = "%s\n%d / %d\n%s模式" % ["體力耗盡" if fail_reason == "hp_out" else "時間到", correct, int(lvl.get("target_correct", 20)), mode_name()]
 		sfx("back")
 	lbl_center.text = ""
 	lbl_hint.text = ""
 	btn_next.visible = level_index + 1 < levels.size()
 	btn_next.disabled = not can_go_next()
 	pause_box.visible = false
+	lbl_hint.visible = true
 	touches.clear()
 	results_box.visible = true
 	if dev_mode:
-		last_saved_path = logger.save("clear" if cleared else fail_reason, elapsed, clock(), stars, hp)
+		last_saved_path = logger.save("clear" if cleared else fail_reason, elapsed, clock(), stars, hp, speed_mode)
 		print("[dev] timing saved: ", last_saved_path)
 	print("[result] %s %s%s clock=%.3f elapsed=%.3f penalty=%.1f correct=%d wrong=%d miss=%d stars=%d" % [
 		level_id, "CLEAR" if cleared else "FAIL", "" if cleared else "(" + fail_reason + ")", clock(), elapsed, penalty, correct, wrong, missed, stars])
@@ -942,17 +1044,25 @@ func _update_hud() -> void:
 	lbl_notice.pivot_offset = lbl_notice.size * 0.5
 	lbl_combo.pivot_offset = lbl_combo.size * 0.5
 	var in_game := state != State.SELECT
-	lbl_time.visible = in_game; lbl_count.visible = in_game; lbl_speed.visible = in_game
+	lbl_time.visible = in_game; lbl_count.visible = in_game; lbl_speed.visible = in_game; hearts_box.visible = in_game
 	var playing := state == State.RUNNING or state == State.READY
 	for b in [btn_accel, btn_brake, btn_pause, btn_voice]:
 		b.visible = playing
+	btn_lock.visible = playing and speed_mode == "race"
+	_layout_touch()
+	_set_btn_lit(btn_lock, ctrl.locked)
 	_set_btn_lit(btn_accel, ctrl.is_accelerating())
 	_set_btn_lit(btn_brake, ctrl.is_braking())
 	var limit := float(lvl.get("time_limit_s", 60.0))
 	lbl_time.text = "TIME %.1f / %d" % [clock(), int(limit)]
 	lbl_count.text = "%d / %d" % [correct, int(lvl.get("target_correct", 20))]
 	var mode := "BRAKE" if ctrl.is_braking() else ("ACCEL" if ctrl.is_accelerating() else "")
-	lbl_speed.text = "%3d km/h  %s" % [roundi(ctrl.kmh()), mode]
+	if speed_mode == "step":
+		lbl_speed.text = "%d → %d km/h" % [roundi(ctrl.kmh()), roundi(ctrl.target_kmh())]
+	elif ctrl.locked:
+		lbl_speed.text = "%d km/h  鎖定 %d" % [roundi(ctrl.kmh()), roundi(ctrl.lock_kmh())]
+	else:
+		lbl_speed.text = "%3d km/h  %s" % [roundi(ctrl.kmh()), mode]
 	lbl_dev.visible = dev_mode
 	if dev_mode:
 		var last := ""
@@ -1001,6 +1111,8 @@ func _touch(ev: InputEvent) -> void:
 				pause_game(); return
 			if state == State.RUNNING and _hit(btn_voice, ev.position):
 				replay_voice(); return
+			if state == State.RUNNING and _hit(btn_lock, ev.position):
+				ctrl.toggle_lock(); return
 			if state == State.READY:
 				start_run()
 			if state != State.RUNNING:
@@ -1057,6 +1169,8 @@ func _unhandled_input(ev: InputEvent) -> void:
 			if ev.pressed and state == State.RUNNING: change_lane(-1)
 		KEY_D, KEY_RIGHT:
 			if ev.pressed and state == State.RUNNING: change_lane(1)
+		KEY_F:
+			if ev.pressed and state == State.RUNNING: ctrl.toggle_lock()
 		KEY_E:
 			if ev.pressed: replay_voice()
 		KEY_ESCAPE, KEY_P:

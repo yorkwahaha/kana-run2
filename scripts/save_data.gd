@@ -56,5 +56,13 @@ func is_unlocked(levels: Array, i: int) -> bool:
 		return false
 	return bool(get_record(str(levels[i - 1].get("id"))).get("cleared", false))
 
+func get_setting(key: String, default = null):
+	return data.get("settings", {}).get(key, default)
+
+func set_setting(key: String, value) -> void:
+	if not data.has("settings"):
+		data["settings"] = {}
+	data.settings[key] = value
+
 func clear_all() -> void:
 	data = {"version": 1, "levels": {}}

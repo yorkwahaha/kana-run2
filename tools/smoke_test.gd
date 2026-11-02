@@ -46,6 +46,70 @@ func unit_tests() -> void:
 	check(c.is_braking() and not c.is_accelerating(), "brake wins when both are held")
 	c.release_all()
 	check(not c.holding and not c.brake_held, "release_all lets go of both")
+	mode_unit_tests()
+
+func _run(c, secs: float) -> void:
+	var t := 0.0
+	while t < secs - 0.00001:
+		c.step(1.0 / 60.0); t += 1.0 / 60.0
+
+func mode_unit_tests() -> void:
+	print("cruise lock (race)")
+	var c = SpeedController.new()
+	c.configure({"max_speed_kmh": 60, "accel_time_s": 3.0, "brake_time_s": 1.2, "coast_time_s": 5.0, "step_kmh": 5})
+	c.press(); _run(c, 2.0); c.release()
+	var v: float = c.kmh()
+	c.toggle_lock()
+	check(c.locked and absf(c.lock_kmh() - v) < 0.01, "lock captures current speed (%.1f km/h)" % v)
+	_run(c, 3.0)
+	check(absf(c.kmh() - v) < 0.01, "locked + no input = holds speed (no coast)")
+	c.press(); _run(c, 0.5)
+	check(c.kmh() > v + 5.0, "hold accel while locked = temporary speed-up")
+	c.release(); _run(c, 0.1)
+	check(c.kmh() > v + 0.5 and c.kmh() < v + 10.0, "on release speed returns gradually (not instant)")
+	_run(c, 2.0)
+	check(absf(c.kmh() - v) < 0.01, "returns to locked speed")
+	c.brake_press(); _run(c, 0.4); c.brake_release()
+	var low: float = c.kmh()
+	check(low < v - 10.0, "hold brake while locked = temporary slow-down")
+	_run(c, 0.2)
+	check(c.kmh() > low and c.kmh() < v, "climbs back along accel curve")
+	_run(c, 3.0)
+	check(absf(c.kmh() - v) < 0.01, "back at locked speed")
+	c.toggle_lock(); _run(c, 1.0)
+	check(not c.locked and c.kmh() < v - 5.0, "unlock = coasts again")
+	print("step mode")
+	var d = SpeedController.new()
+	d.configure({"max_speed_kmh": 60, "accel_time_s": 3.0, "brake_time_s": 1.2, "coast_time_s": 5.0, "step_kmh": 5, "step_wrong_halves_target": true})
+	d.set_mode("step")
+	d.press(); d.release(); d.press(); d.release(); d.press(); d.release()
+	check(is_equal_approx(d.target_kmh(), 15.0), "3 taps = target 15 km/h")
+	_run(d, 0.1)
+	check(d.kmh() > 0.0 and d.kmh() < 15.0, "speed chases target along accel curve (%.1f)" % d.kmh())
+	_run(d, 1.0)
+	check(is_equal_approx(d.kmh(), 15.0), "reaches target")
+	_run(d, 5.0)
+	check(is_equal_approx(d.kmh(), 15.0), "no input = holds target (no coast)")
+	for i in 20: d.press(); d.release()
+	check(is_equal_approx(d.target_kmh(), 60.0), "target clamps at 60")
+	_run(d, 4.0)
+	d.brake_press(); d.brake_release()
+	check(is_equal_approx(d.target_kmh(), 55.0), "brake tap = -5")
+	_run(d, 0.05)
+	check(d.kmh() < 60.0 and d.kmh() > 55.0 and d.is_braking(), "slows toward target along brake curve")
+	for i in 30: d.brake_press(); d.brake_release()
+	check(d.target_kmh() == 0.0, "target clamps at 0")
+	_run(d, 3.0)
+	check(d.kmh() == 0.0, "stops at target 0")
+	for i in 6: d.press(); d.release()
+	_run(d, 3.0)
+	d.scale_speed(0.5)
+	check(is_equal_approx(d.kmh(), 15.0) and is_equal_approx(d.target_kmh(), 15.0), "wrong hit halves speed and target (switch on)")
+	d.step_halves_target = false
+	d.scale_speed(0.5)
+	check(is_equal_approx(d.target_kmh(), 15.0), "switch off: target kept")
+	d.speed = 40.0 / 3.6; d.set_mode("race"); d.set_mode("step")
+	check(is_equal_approx(d.target_kmh(), 40.0), "race->step mid-run: target = current speed (rounded to step)")
 	c.speed = 10.0; c.scale_speed(0.5)
 	check(is_equal_approx(c.speed, 5.0), "wrong hit halves speed")
 	var lvl := {"time_limit_s": 63, "star2_s": 47, "star3_s": 36}
@@ -178,6 +242,7 @@ func regression_tests() -> void:
 	check(g.state == g.State.RUNNING, "R while running does nothing (moved to E)")
 	feature_tests(g)
 	hp_tests(g)
+	mode_game_tests(g)
 
 func _answer(g, mode: String) -> void:
 	var r = g.active_row()
@@ -254,6 +319,8 @@ func feature_tests(g) -> void:
 
 var reg_game
 var auto_level := 0
+var auto_i := 0
+const AUTO_RUNS := [[0, "race"], [1, "race"], [0, "step"], [1, "step"]]
 var phase := "unit"
 var layout_i := 0
 var layout_wait := 0
@@ -275,7 +342,9 @@ func _start_autopilot() -> void:
 	game.autopilot = true
 	game.save_path = "user://selftest_save_auto.json"
 	game.skip_select = true
+	auto_level = AUTO_RUNS[auto_i][0]
 	game.level_index = auto_level
+	game.force_mode = AUTO_RUNS[auto_i][1]
 	game.force_dev_mode = true
 	game.rng_seed = 7
 	root.add_child(game)
@@ -352,6 +421,73 @@ func hp_tests(g) -> void:
 	var j = JSON.parse_string(FileAccess.get_file_as_string(g.last_saved_path))
 	check(j is Dictionary and j.outcome == "hp_out" and int(j.hp_left) == 0, "timing log records outcome hp_out")
 	g.dev_mode = false
+	g.set_level(0)
+
+func mode_game_tests(g) -> void:
+	print("speed modes in game")
+	g.set_speed_mode("race")
+	g.set_level(0); g.reset_run(); _key(g, KEY_W, true); g._tick(2.0); _key(g, KEY_W, false)
+	_key(g, KEY_F, true); _key(g, KEY_F, false)
+	g._update_hud()
+	check(g.ctrl.locked and g.lbl_speed.text.contains("鎖定") and g.btn_lock.visible, "F locks, HUD shows 鎖定 + km/h, 鎖定 button visible")
+	var v: float = g.ctrl.kmh()
+	for i in 120: g.ctrl.step(1.0 / 60.0)
+	check(absf(g.ctrl.kmh() - v) < 0.01, "in game: locked speed held")
+	_tap(g, 8, g.btn_lock.get_global_rect().get_center(), true); _tap(g, 8, g.btn_lock.get_global_rect().get_center(), false)
+	check(not g.ctrl.locked, "鎖定 button toggles lock off")
+	g.set_speed_mode("step")
+	g._update_hud()
+	check(not g.btn_lock.visible and g.lbl_speed.text.contains("→"), "step mode: no 鎖定 button, HUD shows current → target")
+	g.reset_run()
+	_key(g, KEY_W, true); _key(g, KEY_W, false)
+	var echo := InputEventKey.new(); echo.keycode = KEY_W; echo.pressed = true; echo.echo = true
+	g._unhandled_input(echo)
+	_key(g, KEY_UP, true); _key(g, KEY_UP, false)
+	check(is_equal_approx(g.ctrl.target_kmh(), 10.0), "W / ↑ taps = +5 each, key-repeat (echo) ignored")
+	_key(g, KEY_S, true); _key(g, KEY_S, false)
+	check(is_equal_approx(g.ctrl.target_kmh(), 5.0), "S tap = -5")
+	var acc: Vector2 = g.btn_accel.get_global_rect().get_center()
+	_tap(g, 0, acc, true); _tap(g, 0, acc, false); _tap(g, 0, acc, true); _tap(g, 0, acc, false)
+	check(is_equal_approx(g.ctrl.target_kmh(), 15.0), "「加速」 taps = +5 each")
+	_tap(g, 1, g.btn_brake.get_global_rect().get_center(), true); _tap(g, 1, g.btn_brake.get_global_rect().get_center(), false)
+	check(is_equal_approx(g.ctrl.target_kmh(), 10.0), "「煞車」 tap = -5")
+	var sd = SaveData.new(); sd.path = g.save.path; sd.load_file()
+	check(sd.get_setting("speed_mode") == "step", "mode saved to save file")
+	# pause-menu switch
+	g.ctrl.speed = 32.0 / 3.6
+	g.pause_game()
+	check(g.btn_mode_pause.text.begins_with("模式：點放"), "pause menu shows mode switch")
+	g.btn_mode_pause.pressed.emit()
+	check(g.speed_mode == "race" and g.ctrl.mode == "race" and g.state == g.State.PAUSED and not g.ctrl.locked, "pause-menu switch to 賽車 applies (still paused, unlocked)")
+	g.btn_mode_pause.pressed.emit()
+	check(g.speed_mode == "step" and is_equal_approx(g.ctrl.target_kmh(), 30.0), "switch to 點放 mid-run: target = current speed rounded (30)")
+	check(not g.lbl_hint.visible, "romaji hint hidden behind pause menu")
+	g.resume()
+	check(g.lbl_hint.visible, "hint back after resume")
+	# settings screen
+	g.show_select()
+	check(g.btn_settings != null and g.btn_settings.text.contains("點放"), "level select has 「設定」 showing mode")
+	g.btn_settings.pressed.emit()
+	check(g.settings_box.visible and not g.select_box.visible and g.btn_mode_step.button_pressed, "settings panel opens, current mode selected")
+	g.btn_mode_race.pressed.emit()
+	sd.load_file()
+	check(g.speed_mode == "race" and sd.get_setting("speed_mode") == "race" and g.btn_mode_race.button_pressed and not g.btn_mode_step.button_pressed, "settings: 賽車 chosen and saved")
+	g.btn_settings_back.pressed.emit()
+	check(g.select_box.visible and not g.settings_box.visible, "返回 goes back to level select")
+	# results + log field
+	g.set_speed_mode("step")
+	g.force_dev_mode = true; g.dev_mode = true
+	g.set_level(0); g.reset_run(); g.start_run()
+	while g.correct < 20: _answer(g, "correct")
+	g._tick(0.0)
+	check(g.lbl_result.text.contains("點放模式"), "results show mode")
+	var j = JSON.parse_string(FileAccess.get_file_as_string(g.last_saved_path))
+	check(j is Dictionary and j.mode == "step", "timing JSON records mode")
+	var csv := FileAccess.get_file_as_string("user://timing/runs_v3.csv").strip_edges().split("\n")
+	check(csv[0].ends_with(",mode") and csv[-1].ends_with(",step"), "runs_v3.csv has mode column")
+	g.dev_mode = false
+	g.set_speed_mode("race")
+	g.save.clear_all(); g.save.save_file()
 	g.set_level(0)
 
 func level_tests(g) -> void:
@@ -444,13 +580,13 @@ func layout_check(g, sz: Vector2i) -> void:
 	var inside := true
 	var bad := []
 	for item in [["hint", g.lbl_hint], ["notice", g.lbl_notice], ["float", g.lbl_float], ["center", g.lbl_center],
-			["results", g.results_box.get_child(0)], ["select", g.select_box.get_child(0)], ["pause", g.pause_box.get_child(0)],
+			["results", g.results_box.get_child(0)], ["select", g.select_box.get_child(0)], ["pause", g.pause_box.get_child(0)], ["settings", g.settings_box.get_child(0)],
 			["speed", g.lbl_speed], ["combo", g.lbl_combo]]:
 		var rc: Rect2 = item[1].get_global_rect()
 		if absf(rc.get_center().x - cx) > 2.0:
 			centered = false; bad.append(item[0])
 	for item in [g.lbl_time, g.lbl_count, g.lbl_speed, g.lbl_combo, g.lbl_hint, g.results_box.get_child(0), g.select_box.get_child(0),
-			g.pause_box.get_child(0), g.btn_accel, g.btn_brake, g.btn_pause, g.btn_voice, g.hearts_box]:
+			g.pause_box.get_child(0), g.btn_accel, g.btn_brake, g.btn_pause, g.btn_voice, g.hearts_box, g.btn_lock, g.settings_box.get_child(0)]:
 		var rc: Rect2 = item.get_global_rect()
 		if rc.position.x < -1 or rc.position.y < -1 or rc.end.x > vr.size.x + 1 or rc.end.y > vr.size.y + 1:
 			inside = false; bad.append(str(item.name) + " " + str(item.get_global_rect()))
@@ -462,6 +598,11 @@ func layout_check(g, sz: Vector2i) -> void:
 	check(a.get_center().x > vr.size.x * 0.5 and a.end.y > vr.size.y * 0.75 and b.get_center().x < vr.size.x * 0.5 and b.end.y > vr.size.y * 0.75, "%s: 加速 bottom-right, 煞車 bottom-left" % tag)
 	var h: Rect2 = g.hearts_box.get_global_rect()
 	check(h.get_center().x < vr.size.x * 0.5 and not h.intersects(p) and not h.intersects(v) and not h.intersects(g.lbl_time.get_global_rect()) and not h.intersects(g.lbl_count.get_global_rect()), "%s: hearts top-left, clear of time/count/pause %s t%s c%s p%s" % [tag, str(h), str(g.lbl_time.get_global_rect()), str(g.lbl_count.get_global_rect()), str(p)])
+	var lk: Rect2 = g.btn_lock.get_global_rect()
+	var mn := minf(vr.size.x, vr.size.y)
+	check(a.size.x >= mn * 0.27 and b.size.x >= mn * 0.23 and p.size.x >= mn * 0.12, "%s: touch buttons scale with short side (加速 %.0f of %.0f)" % [tag, a.size.x, mn])
+	check(not lk.intersects(a) and not lk.intersects(b) and not lk.intersects(p) and not lk.intersects(v) and not lk.intersects(g.lbl_speed.get_global_rect()) and not lk.intersects(g.lbl_combo.get_global_rect()), "%s: 鎖定 clear of other buttons and HUD" % tag)
+	check(not a.intersects(g.lbl_speed.get_global_rect()) and not b.intersects(g.lbl_speed.get_global_rect()) and not a.intersects(g.lbl_combo.get_global_rect()) and not b.intersects(g.lbl_combo.get_global_rect()), "%s: speed/combo text clear of buttons" % tag)
 	check(p.position.y < vr.size.y * 0.2 and p.get_center().x > vr.size.x * 0.75 and not p.intersects(v) and not a.intersects(b), "%s: pause/speaker top-right, buttons don't overlap" % tag)
 
 func _layout_prepare(g) -> void:
@@ -472,6 +613,8 @@ func _layout_prepare(g) -> void:
 	g.show_select()
 	g.results_box.visible = true
 	g.pause_box.visible = true
+	g.settings_box.visible = true
+	g.btn_lock.visible = true
 
 var total_frames := 0
 
@@ -508,7 +651,7 @@ func _process(_delta: float) -> bool:
 		reg_game.free()
 		reg_game = null
 		phase = "auto"
-		auto_level = 0
+		auto_i = 0
 		_start_autopilot()
 		frames = 0
 		return false
@@ -517,15 +660,17 @@ func _process(_delta: float) -> bool:
 	if frames < 3:
 		return false
 	if game.state == game.State.CLEARED or game.state == game.State.FAILED or frames > 60 * 120:
-		var n := auto_level + 1
+		var n := "%d (%s)" % [auto_level + 1, game.speed_mode]
 		var tgt := 20 if auto_level == 0 else 30
-		check(game.state == game.State.CLEARED, "autopilot clears level %d (clock %.2f s, stars %d, correct %d, wrong %d, miss %d)" % [n, game.clock(), Rules.stars_for(game.clock(), game.lvl), game.correct, game.wrong, game.missed])
-		check(game.wrong == 0 and game.missed == 0, "autopilot L%d makes no mistakes" % n)
+		check(game.state == game.State.CLEARED, "autopilot clears level %s (clock %.2f s, stars %d, correct %d, wrong %d, miss %d)" % [n, game.clock(), Rules.stars_for(game.clock(), game.lvl), game.correct, game.wrong, game.missed])
+		check(game.wrong == 0 and game.missed == 0, "autopilot L%s makes no mistakes" % n)
 		check(game.logger.entries.size() == tgt, "dev logger recorded %d questions" % tgt)
-		check(FileAccess.file_exists("user://timing/runs_v2.csv"), "timing CSV written")
-		if auto_level == 0:
+		check(FileAccess.file_exists("user://timing/runs_v3.csv"), "timing CSV written")
+		if game.speed_mode != AUTO_RUNS[auto_i][1]:
+			check(false, "autopilot mode forced")
+		if auto_i + 1 < AUTO_RUNS.size():
 			root.remove_child(game); game.free()
-			auto_level = 1
+			auto_i += 1
 			_start_autopilot()
 			frames = 0
 			return false
