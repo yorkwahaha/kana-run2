@@ -4,7 +4,6 @@
     "accel_time_s": 3.0,
     "brake_time_s": 1.2,
     "coast_time_s": 5.0,
-    "double_tap_window_s": 0.28,
     "wrong_hit_speed_factor": 0.5
   },
   "lanes": {
@@ -13,8 +12,12 @@
     "lane_change_time_s": 0.16,
     "swipe_min_px": 40,
     "player_width_m": 0.9,
-    "stone_width_m": 1.2,
-    "keyboard_lane_change_requires_hold": false
+    "stone_width_m": 1.2
+  },
+  "hp": {
+    "max_hp": 3,
+    "miss_costs_heart": false,
+    "wrong_damage": 1
   },
   "track": {
     "row_spacing_m": 24.0,
@@ -89,9 +92,9 @@
         "ko"
       ],
       "target_correct": 30,
-      "time_limit_s": 90.0,
-      "star2_s": 66.0,
-      "star3_s": 48.0,
+      "time_limit_s": 91.0,
+      "star2_s": 68.0,
+      "star3_s": 52.0,
       "wrong_penalty_s": 2.0,
       "miss_penalty_s": 1.0
     }

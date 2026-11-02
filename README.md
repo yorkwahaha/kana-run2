@@ -14,20 +14,31 @@ Godot **4.7.2**（`I:\Projects\Godot_v4.7.2`），**Mobile** 渲染器（Web 匯
 ## 操作
 | 動作 | 手機 / 滑鼠 | 鍵盤 |
 |---|---|---|
-| 加速 | 按住 | 按住 Space / W / ↑ |
-| 減速 | 放開 | 放開 |
-| 煞車 | 雙擊並按住 | S / ↓ |
-| 換線 | 按住時左右滑 | A / D / ← / →（設定可改成需按住） |
-| 重播語音 | — | R |
-| 回選關 | 結算畫面按鈕 | Esc / B |
+| 加速 | 按住右下「加速」 | 按住 W / Space / ↑ |
+| 煞車 | 按住左下「煞車」 | 按住 S / ↓ |
+| 自然減速 | 都不按 | 都不按 |
+| 換線 | 左右滑動（另一隻手指，或按著「加速」的手指直接左右滑） | A / D / ← / → |
+| 重播語音 | 右上「重播」 | E |
+| 暫停 | 右上「II」 | Esc / P |
+| 暫停選單 | 「繼續」「重來」「回選關」 | Esc 繼續、R 重來、Q 回選關 |
 | 開發者計時 | — | F3（或啟動參數 `-- --dev`、設定 `dev.timing_mode`） |
+
+- 已移除雙擊煞車。
+- 多點觸控：每隻手指依 index 追蹤；從按鈕開始的手指控制那顆按鈕，其他手指負責滑動換線。
+- 自動暫停：視窗失焦、App 進背景、網頁分頁切走（`visibilitychange`）時自動暫停，並放開所有按住的輸入。暫停時間不計入時間。
 
 ## 關卡與存檔
 - 開啟後先到「選關」。關卡資料全部在 `config/game_config.json` 的 `levels` 陣列（id、name、kana、romaji、target_correct、時限、星數門檻、罰秒；可選 `romaji_first_n` / `voice_only_after_progress` 覆寫提示規則）。**新增關卡只要加一筆資料**，語音用 romaji 對應 `audio/kana/<romaji>.mp3`（102 個音檔已全部在 `asset_manifest.gd` preload，Web 也會打包）。
-- 第一關 あ行：20 題，63／47／36 秒。第二關 あ行＋か行：30 題，90／66／48 秒（暫定，待實測校準）。
+- 第一關 あ行：20 題，63／47／36 秒。第二關 あ行＋か行：30 題，91／68／52 秒（依 Hayato 最佳 45.48 秒校準）。
 - 存檔 `user://save.json`：每關 cleared、最佳星數、最佳時間（只在更好時更新）。過前一關才解鎖下一關。
 - 結算畫面：「重玩」「下一關」（最後一關隱藏、未解鎖時停用）「回選關」。鍵盤：Space/Enter 重玩、N 下一關、Esc/B 回選關、選關畫面按 1–9。
 - 想重置進度：刪除 `%APPDATA%\Godot\app_userdata\Kana Run 2.0\save.json`。
+
+## 體力（HP）
+- 預設 3 顆心（`hp.max_hp`；各關可用 `max_hp` 覆寫）。撞錯 −1 心（加上原本 −2 秒、速度減半）。漏題預設只扣時間；`hp.miss_costs_heart`（或各關 `miss_costs_heart`）設 true 時也扣 1 心。沒有自然扣血。
+- 0 心立即結束，結算顯示「體力耗盡」（時間用完是「時間到」），不算過關；計時紀錄的 outcome 欄位是 `hp_out`／`time_up`／`clear`。
+- 受傷時只有左上的愛心閃紅並晃動，不會晃畫面。
+- 之後做強化用的接口（game.gd）：`set_max_hp_bonus(n)`（極限體力強化）、`add_shield(n)`（護身符擋一次傷害）、`heal(n)`（回 1 心）、`take_damage(n)`，訊號 `hp_changed(hp, max_hp, shield)`、`damaged(amount, blocked)`。目前沒有道具使用它們。
 
 ## 規則（第一關）
 - 三條跑道，石碑每 `row_spacing_m` 公尺一排三塊。聽語音（あいうえお），撞對應假名。
@@ -38,13 +49,13 @@ Godot **4.7.2**（`I:\Projects\Godot_v4.7.2`），**Mobile** 渲染器（Web 匯
 - 校準依據：Hayato 最佳 31.3 秒 × 企劃書公式（三星 ×1.15、二星 ×1.5、過關 ×2.0）。理論最快約 30.7 秒。
 
 ## 參數
-全部在 `config/game_config.json`：速度（極速 60 km/h、加速 3 秒、煞車 1.2 秒、滑行、雙擊判定窗）、跑道寬度與換線時間、石碑間距、打擊感（光暈、擊飛距離、FOV、`screen_shake_on_normal_hit=false`）、各關時限與星數門檻。
+全部在 `config/game_config.json`：速度（極速 60 km/h、加速 3 秒、煞車 1.2 秒、自然減速時間）、跑道寬度與換線時間、石碑間距、打擊感（光暈、擊飛距離、FOV、`screen_shake_on_normal_hit=false`）、各關時限與星數門檻。
 不重新匯出也能在裝置上調：把要覆寫的欄位寫進 `user://game_config_override.json`。
 
 ## 開發者計時模式
 過關或失敗時寫到 `user://timing/`（Windows：`%APPDATA%\Godot\app_userdata\Kana Run 2.0\timing\`）：
 - `run_<時間>.json` / `.csv`：每題目標、結果、反應時間（語音開始→撞到）、當下速度、時間
-- `runs.csv`：每局一行摘要（通關時間、星數、對/錯/漏、平均反應）
+- `runs_v2.csv`：每局一行摘要（結果 clear／time_up／hp_out、通關時間、星數、對/錯/漏、平均反應、剩餘體力）
 畫面右上角同時顯示即時數據。
 
 ## 結構
@@ -63,7 +74,7 @@ audio/ assets/fonts/      從 1.0 複製的語音、音效、音樂、字型
 ```
 
 ## 注意
-- 1.0 的子集字型（ui/bold.ttf）缺「模」，所以提示、連擊、聽音模式用 `assets/fonts/hud_cjk.ttf`（Noto Sans TC 子集，OFL，授權在 `OFL-NotoSansTC.txt`）。HUD 加新中文字時要用 `tools/make_hud_font.py` 重產。
+- 1.0 的子集字型（ui/bold.ttf）缺「模」，所以提示、連擊、聽音模式用 `assets/fonts/hud_cjk.ttf`（Noto Sans TC 子集，OFL，授權在 `OFL-NotoSansTC.txt`）。HUD 加新中文字時要用 `tools/make_hud_font.py` 重產（它會自動掃 scripts/ 和 config/ 裡用到的所有中文字）。
 - 只裝了 Web 匯出模板（沒有 Windows/Android 模板），所以沒有 Windows exe / APK 預設。
 - 匯出時出現 `include_filter` 的 ERROR 可忽略（4.7 已移除該鍵）。
 

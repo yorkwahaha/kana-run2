@@ -23,24 +23,29 @@ func check(cond: bool, msg: String) -> void:
 func unit_tests() -> void:
 	print("unit tests")
 	var c = SpeedController.new()
-	c.configure({"max_speed_kmh": 60, "accel_time_s": 3.0, "brake_time_s": 1.2, "coast_time_s": 5.0, "double_tap_window_s": 0.28})
+	c.configure({"max_speed_kmh": 60, "accel_time_s": 3.0, "brake_time_s": 1.2, "coast_time_s": 5.0})
 	c.press()
 	var t := 0.0
 	while c.speed < c.max_speed - 0.0001 and t < 10.0:
 		c.step(1.0 / 60.0); t += 1.0 / 60.0
 	check(absf(t - 3.0) < 0.05, "0->60 km/h in ~3 s (got %.2f)" % t)
 	check(absf(c.kmh() - 60.0) < 0.01, "caps at 60 km/h")
-	c.release(); c.step(0.1)
-	c.press()   # second press within window = brake
-	check(c.is_braking(), "double-tap starts brake")
+	c.release(); c.press(); c.release(); c.press()
+	check(c.is_accelerating() and not c.is_braking(), "rapid re-presses of accelerate never brake (no double-tap)")
+	c.release()
+	var v0: float = c.speed
+	c.step(1.0)
+	check(c.speed < v0 and c.speed > 0.0 and absf((v0 - c.speed) - c.max_speed / 5.0) < 0.01, "neither held = natural coast-down")
+	c.speed = c.max_speed
+	c.brake_press()
 	t = 0.0
 	while c.speed > 0.0 and t < 10.0:
 		c.step(1.0 / 60.0); t += 1.0 / 60.0
-	check(t <= 1.25, "brake to 0 within ~1.2 s (got %.2f)" % t)
-	c.release()
-	c.step(1.0)
+	check(t <= 1.25, "brake held: 60 -> 0 within ~1.2 s (got %.2f)" % t)
 	c.press()
-	check(not c.is_braking(), "slow second press is not a double-tap")
+	check(c.is_braking() and not c.is_accelerating(), "brake wins when both are held")
+	c.release_all()
+	check(not c.holding and not c.brake_held, "release_all lets go of both")
 	c.speed = 10.0; c.scale_speed(0.5)
 	check(is_equal_approx(c.speed, 5.0), "wrong hit halves speed")
 	var lvl := {"time_limit_s": 63, "star2_s": 47, "star3_s": 36}
@@ -59,45 +64,120 @@ func unit_tests() -> void:
 		prev = k[r.target]
 	check(ok, "rows: 3 distinct kana, target present, no immediate repeat")
 
-## Regression: first accelerate press from rest must accelerate (was braking).
+func _key(g, code: int, down: bool) -> void:
+	var ev := InputEventKey.new(); ev.keycode = code; ev.pressed = down
+	g._unhandled_input(ev)
+
+func _tap(g, idx: int, pos: Vector2, down: bool) -> void:
+	var ev := InputEventScreenTouch.new(); ev.index = idx; ev.position = pos; ev.pressed = down
+	g._touch(ev)
+
+func _drag(g, idx: int, pos: Vector2) -> void:
+	var ev := InputEventScreenDrag.new(); ev.index = idx; ev.position = pos
+	g._touch(ev)
+
 func regression_tests() -> void:
-	print("regression: first press from rest")
+	print("controls")
 	var g = reg_game
-	for keycode in [KEY_SPACE, KEY_W]:
+	for keycode in [KEY_SPACE, KEY_W, KEY_UP]:
 		g.reset_run()
-		var ev := InputEventKey.new(); ev.keycode = keycode; ev.pressed = true
-		g._unhandled_input(ev)          # starts the run AND holds accelerate
-		check(g.state == g.State.RUNNING, "key %s starts the run" % OS.get_keycode_string(keycode))
-		check(g.ctrl.is_accelerating() and not g.ctrl.is_braking(), "first %s press accelerates, not brakes" % OS.get_keycode_string(keycode))
+		_key(g, keycode, true)
+		check(g.state == g.State.RUNNING and g.ctrl.is_accelerating() and not g.ctrl.is_braking(), "first %s press starts and accelerates" % OS.get_keycode_string(keycode))
 		g._tick(0.5)
-		check(g.ctrl.kmh() > 5.0, "speed rises after first %s press (%.1f km/h)" % [OS.get_keycode_string(keycode), g.ctrl.kmh()])
-	# touch / mouse
+		check(g.ctrl.kmh() > 5.0, "speed rises (%.1f km/h)" % g.ctrl.kmh())
+		_key(g, keycode, false)
+	# rapid double press of accelerate must not brake any more
 	g.reset_run()
-	var t := InputEventScreenTouch.new(); t.pressed = true; t.index = 0
-	g._unhandled_input(t)
-	check(g.ctrl.is_accelerating() and not g.ctrl.is_braking(), "first touch accelerates")
-	# real double-tap still brakes
-	g._tick(0.5)
-	t = InputEventScreenTouch.new(); t.pressed = false; t.index = 0; g._unhandled_input(t)
-	g._tick(0.1)
-	t = InputEventScreenTouch.new(); t.pressed = true; t.index = 0; g._unhandled_input(t)
-	check(g.ctrl.is_braking(), "real double-tap (touch) brakes")
-	# keyboard double-tap
+	_key(g, KEY_SPACE, true); g._tick(0.3); _key(g, KEY_SPACE, false); g._tick(0.05); _key(g, KEY_SPACE, true)
+	check(g.ctrl.is_accelerating() and not g.ctrl.is_braking(), "double-tapping Space accelerates (double-tap brake removed)")
+	_key(g, KEY_SPACE, false)
+	for keycode in [KEY_S, KEY_DOWN]:
+		g.ctrl.speed = 10.0
+		_key(g, keycode, true)
+		check(g.ctrl.is_braking(), "%s held = brake" % OS.get_keycode_string(keycode))
+		g._tick(1.0)
+		check(g.ctrl.speed == 0.0, "%s brakes to a stop" % OS.get_keycode_string(keycode))
+		_key(g, keycode, false)
+		check(not g.ctrl.is_braking(), "%s released = no brake" % OS.get_keycode_string(keycode))
+	g.ctrl.speed = 10.0; g._tick(0.5)
+	check(g.ctrl.speed < 10.0 and g.ctrl.speed > 0.0, "no key = coast-down")
+	var l0: int = g.lane
+	_key(g, KEY_A, true); _key(g, KEY_A, false)
+	_key(g, KEY_D, true); _key(g, KEY_D, false); _key(g, KEY_RIGHT, true)
+	check(g.lane == mini(l0 + 1, 2), "A/D/arrow lane changes without holding accelerate")
+	print("touch")
 	g.reset_run()
-	var k := InputEventKey.new(); k.keycode = KEY_SPACE; k.pressed = true; g._unhandled_input(k)
-	g._tick(0.3)
-	k = InputEventKey.new(); k.keycode = KEY_SPACE; k.pressed = false; g._unhandled_input(k)
-	g._tick(0.1)
-	k = InputEventKey.new(); k.keycode = KEY_SPACE; k.pressed = true; g._unhandled_input(k)
-	check(g.ctrl.is_braking(), "real double-tap (Space) brakes")
-	# controller level: reset clears pending double-tap
-	var c = SpeedController.new()
-	c.press(); c.release(); c.reset(); c.press()
-	check(not c.is_braking(), "reset() clears pending double-tap")
-	var c2 = SpeedController.new()
-	c2.release(); c2.press()
-	check(not c2.is_braking(), "release without prior press is not a first tap")
+	var acc: Vector2 = g.btn_accel.get_global_rect().get_center()
+	var brk: Vector2 = g.btn_brake.get_global_rect().get_center()
+	var mid: Vector2 = g.get_viewport().get_visible_rect().size * Vector2(0.5, 0.45)
+	_tap(g, 0, acc, true)
+	check(g.state == g.State.RUNNING and g.ctrl.is_accelerating(), "first touch on 「加速」 starts and accelerates")
+	g.lane = 1; g.player_x = g.lane_x(1)
+	_tap(g, 1, mid, true)
+	_drag(g, 1, mid + Vector2(120, 0))
+	check(g.lane == 2 and g.ctrl.is_accelerating(), "second finger swipes lane while 「加速」 stays held")
+	_tap(g, 1, mid + Vector2(120, 0), false)
+	_drag(g, 0, acc + Vector2(-120, 0))
+	check(g.lane == 1 and g.ctrl.is_accelerating(), "accelerate finger can swipe sideways and keep accelerating")
+	_tap(g, 2, brk, true)
+	check(g.ctrl.is_braking(), "「煞車」 held brakes (even with 加速 held)")
+	_tap(g, 2, brk, false)
+	check(not g.ctrl.is_braking() and g.ctrl.is_accelerating(), "release 「煞車」 -> back to accelerate")
+	_tap(g, 0, acc, false)
+	check(not g.ctrl.holding and not g.ctrl.brake_held, "all fingers up = coast")
+	_tap(g, 3, mid, true); _tap(g, 3, mid, false); _tap(g, 3, mid, true)
+	check(not g.ctrl.is_braking() and not g.ctrl.holding, "double-tap on screen does nothing (no brake)")
+	_tap(g, 3, mid, false)
+	print("pause")
+	g.reset_run(); _key(g, KEY_SPACE, true)
+	g._tick(1.0)
+	var e0: float = g.elapsed
+	_key(g, KEY_ESCAPE, true); _key(g, KEY_ESCAPE, false)
+	check(g.state == g.State.PAUSED and g.pause_box.visible, "Esc pauses, menu shown")
+	check(not g.ctrl.holding, "pause releases held accelerate")
+	_key(g, KEY_SPACE, false)
+	for i in 120: g._process(1.0 / 60.0)
+	check(is_equal_approx(g.elapsed, e0), "timer frozen while paused (2 s of frames)")
+	_key(g, KEY_ESCAPE, true)
+	check(g.state == g.State.RUNNING and not g.pause_box.visible and not g.ctrl.holding, "Esc again resumes, nothing stuck held")
+	g._process(0.5)
+	check(absf(g.elapsed - (e0 + 0.5)) < 0.001, "clock = play time only (paused time excluded)")
+	_key(g, KEY_P, true)
+	check(g.state == g.State.PAUSED, "P pauses")
+	g.btn_resume.pressed.emit()
+	check(g.state == g.State.RUNNING, "「繼續」 resumes")
+	_key(g, KEY_P, true); _key(g, KEY_R, true)
+	check(g.state == g.State.READY and g.elapsed == 0.0, "R in pause = restart")
+	_key(g, KEY_SPACE, true); _key(g, KEY_SPACE, false); _key(g, KEY_ESCAPE, true); _key(g, KEY_Q, true)
+	check(g.state == g.State.SELECT and not g.pause_box.visible, "Q in pause = back to level select")
+	g.reset_run(); g.start_run(); g.pause_game(); g.btn_restart.pressed.emit()
+	check(g.state == g.State.READY, "「重來」 restarts")
+	g.start_run(); g.pause_game(); g.btn_quit.pressed.emit()
+	check(g.state == g.State.SELECT, "「回選關」 from pause")
+	g.reset_run(); g.start_run()
+	_tap(g, 5, g.btn_pause.get_global_rect().get_center(), true)
+	check(g.state == g.State.PAUSED, "on-screen pause button pauses")
+	g.resume()
+	g.ctrl.press()
+	g._notification(Node.NOTIFICATION_APPLICATION_FOCUS_OUT)
+	check(g.state == g.State.PAUSED and not g.ctrl.holding, "focus-out auto-pauses and releases input")
+	g.resume()
+	g._notification(Node.NOTIFICATION_APPLICATION_PAUSED)
+	check(g.state == g.State.PAUSED, "app paused (mobile/background) auto-pauses")
+	g.resume()
+	g._on_js_visibility(null)   # not web: document missing, must not crash
+	check(g.state == g.State.RUNNING, "web visibility handler is safe outside web")
+	print("voice replay")
+	g.voice.stop(); g.voice.stream = null
+	_key(g, KEY_E, true)
+	check(g.voice.stream != null, "E replays the current voice")
+	g.voice.stream = null
+	_tap(g, 6, g.btn_voice.get_global_rect().get_center(), true)
+	check(g.voice.stream != null and g.state == g.State.RUNNING, "speaker button replays voice")
+	_key(g, KEY_R, true)
+	check(g.state == g.State.RUNNING, "R while running does nothing (moved to E)")
 	feature_tests(g)
+	hp_tests(g)
 
 func _answer(g, mode: String) -> void:
 	var r = g.active_row()
@@ -164,6 +244,7 @@ func feature_tests(g) -> void:
 	print("random play terminates")
 	var rng := RandomNumberGenerator.new(); rng.seed = 11
 	g.reset_run(); g.start_run()
+	g.set_max_hp(999, true)   # this test is about re-queue termination, not HP
 	var steps := 0
 	while g.correct < 20 and steps < 500:
 		var p := rng.randf()
@@ -199,12 +280,86 @@ func _start_autopilot() -> void:
 	game.rng_seed = 7
 	root.add_child(game)
 
+func _hearts(g) -> String:
+	var t := ""
+	for c in g.hearts_box.get_children():
+		if c != g.lbl_shield: t += c.text
+	return t
+
+func hp_tests(g) -> void:
+	print("HP")
+	var cfg: Dictionary = GameConfig.load_config()
+	check(int(cfg.hp.max_hp) == 3 and cfg.hp.miss_costs_heart == false, "config: 3 hearts, miss costs no heart by default")
+	g.set_level(0); g.reset_run(); g.start_run()
+	check(g.hp == 3 and g.max_hp == 3 and _hearts(g) == "♥♥♥", "run starts with 3 hearts")
+	var got := []
+	var cb := func(h, m, sh): got.append([h, m, sh])
+	g.hp_changed.connect(cb)
+	g.ctrl.speed = 10.0
+	var p0: float = g.penalty
+	_answer(g, "wrong")
+	check(g.hp == 2 and _hearts(g) == "♥♥♡", "wrong hit = -1 heart")
+	check(is_equal_approx(g.penalty - p0, 2.0) and is_equal_approx(g.ctrl.speed, 5.0), "wrong hit still -2 s and speed halved")
+	check(got.size() >= 1 and got[-1][0] == 2, "hp_changed signal emitted")
+	check(g.cam.h_offset == 0.0 and g.cam.v_offset == 0.0, "no camera/screen shake on damage")
+	_answer(g, "miss")
+	check(g.hp == 2, "miss costs no heart by default")
+	g.elapsed = 0.0
+	for i in 30: g._tick(1.0 / 60.0)
+	check(g.hp == 2, "no passive HP drain")
+	_answer(g, "wrong")
+	check(g.hp == 1 and g.state == g.State.RUNNING, "1 heart left, still running")
+	_answer(g, "wrong")
+	check(g.hp == 0 and g.state == g.State.FAILED and g.fail_reason == "hp_out", "0 HP ends the run immediately (reason hp_out)")
+	check(g.lbl_result.text.begins_with("體力耗盡") and g.results_box.visible, "results show 「體力耗盡」")
+	check(not g.save.get_record("level_01").get("cleared", false), "hp_out is not saved as a clear")
+	g.hp_changed.disconnect(cb)
+	# time-up reason
+	g.reset_run(); g.start_run(); g.elapsed = 999.0; g._tick(0.0)
+	check(g.fail_reason == "time_up" and g.lbl_result.text.begins_with("時間到"), "time-up shows 「時間到」 (distinct reason)")
+	# miss switch
+	g.reset_run(); g.start_run(); g.miss_costs_heart = true
+	_answer(g, "miss")
+	check(g.hp == 2, "miss_costs_heart switch: miss = -1 heart")
+	g.set_level(0)
+	# per-level override
+	var lv: Array = GameConfig.levels(cfg)
+	lv[0]["max_hp"] = 5; lv[0]["miss_costs_heart"] = true
+	g.levels = lv; g.set_level(0); g.reset_run()
+	check(g.max_hp == 5 and g.hp == 5 and g.miss_costs_heart, "per-level max_hp / miss_costs_heart override")
+	g.levels = GameConfig.levels(GameConfig.load_config()); g.set_level(0); g.reset_run(); g.start_run()
+	# hooks
+	g.add_shield(1)
+	check(g.lbl_shield.text == "盾×1", "shield shown")
+	var blocked := []
+	var dcb := func(a, b): blocked.append(b)
+	g.damaged.connect(dcb)
+	check(not g.take_damage(1) and g.hp == 3 and g.shield == 0 and blocked == [true], "shield (charm) blocks one damage")
+	g.take_damage(1)
+	check(g.hp == 2 and blocked[-1] == false, "next damage goes through")
+	g.damaged.disconnect(dcb)
+	g.heal(1); g.heal(5)
+	check(g.hp == 3, "heal +1, capped at max")
+	g.set_max_hp_bonus(2)
+	check(g.max_hp == 5 and g.hp == 5 and _hearts(g) == "♥♥♥♥♥", "max-HP upgrade hook (+2) refills to 5")
+	g.reset_run()
+	check(g.max_hp == 5, "max-HP bonus persists across restarts")
+	g.set_max_hp_bonus(0); g.reset_run()
+	check(g.max_hp == 3, "bonus removable")
+	# dev log reason
+	g.force_dev_mode = true; g.dev_mode = true
+	g.start_run(); g.take_damage(3)
+	var j = JSON.parse_string(FileAccess.get_file_as_string(g.last_saved_path))
+	check(j is Dictionary and j.outcome == "hp_out" and int(j.hp_left) == 0, "timing log records outcome hp_out")
+	g.dev_mode = false
+	g.set_level(0)
+
 func level_tests(g) -> void:
 	print("level data")
 	var lv: Array = GameConfig.levels(GameConfig.load_config())
 	check(lv.size() >= 2 and lv[0].id == "level_01" and lv[1].id == "level_02", "levels loaded in order from config (%d)" % lv.size())
 	check(int(lv[0].target_correct) == 20 and float(lv[0].time_limit_s) == 63.0 and float(lv[0].star2_s) == 47.0 and float(lv[0].star3_s) == 36.0, "level 1: 20 / 63 / 47 / 36 unchanged")
-	check(int(lv[1].target_correct) == 30 and float(lv[1].time_limit_s) == 90.0 and float(lv[1].star2_s) == 66.0 and float(lv[1].star3_s) == 48.0, "level 2: 30 / 90 / 66 / 48")
+	check(int(lv[1].target_correct) == 30 and float(lv[1].time_limit_s) == 91.0 and float(lv[1].star2_s) == 68.0 and float(lv[1].star3_s) == 52.0, "level 2: 30 / 91 / 68 / 52")
 	check("".join(lv[1].kana) == "あいうえおかきくけこ", "level 2 pool = あ行 + か行")
 	var voices_ok := true
 	for L in lv:
@@ -289,17 +444,25 @@ func layout_check(g, sz: Vector2i) -> void:
 	var inside := true
 	var bad := []
 	for item in [["hint", g.lbl_hint], ["notice", g.lbl_notice], ["float", g.lbl_float], ["center", g.lbl_center],
-			["results", g.results_box.get_child(0)], ["select", g.select_box.get_child(0)]]:
+			["results", g.results_box.get_child(0)], ["select", g.select_box.get_child(0)], ["pause", g.pause_box.get_child(0)],
+			["speed", g.lbl_speed], ["combo", g.lbl_combo]]:
 		var rc: Rect2 = item[1].get_global_rect()
 		if absf(rc.get_center().x - cx) > 2.0:
 			centered = false; bad.append(item[0])
-	for item in [g.lbl_time, g.lbl_count, g.lbl_speed, g.lbl_combo, g.lbl_hint, g.results_box.get_child(0), g.select_box.get_child(0)]:
+	for item in [g.lbl_time, g.lbl_count, g.lbl_speed, g.lbl_combo, g.lbl_hint, g.results_box.get_child(0), g.select_box.get_child(0),
+			g.pause_box.get_child(0), g.btn_accel, g.btn_brake, g.btn_pause, g.btn_voice, g.hearts_box]:
 		var rc: Rect2 = item.get_global_rect()
 		if rc.position.x < -1 or rc.position.y < -1 or rc.end.x > vr.size.x + 1 or rc.end.y > vr.size.y + 1:
 			inside = false; bad.append(str(item.name) + " " + str(item.get_global_rect()))
 	check(centered, "%s: centered text/panels are centered (canvas %.0fx%.0f) %s" % [tag, vr.size.x, vr.size.y, str(bad)])
 	check(inside, "%s: all HUD/panels inside the screen %s" % [tag, str(bad)])
 	check(g.lbl_center.get_global_rect().size.x >= vr.size.x - 60, "%s: info text spans the full width" % tag)
+	var a: Rect2 = g.btn_accel.get_global_rect(); var b: Rect2 = g.btn_brake.get_global_rect()
+	var p: Rect2 = g.btn_pause.get_global_rect(); var v: Rect2 = g.btn_voice.get_global_rect()
+	check(a.get_center().x > vr.size.x * 0.5 and a.end.y > vr.size.y * 0.75 and b.get_center().x < vr.size.x * 0.5 and b.end.y > vr.size.y * 0.75, "%s: 加速 bottom-right, 煞車 bottom-left" % tag)
+	var h: Rect2 = g.hearts_box.get_global_rect()
+	check(h.get_center().x < vr.size.x * 0.5 and not h.intersects(p) and not h.intersects(v) and not h.intersects(g.lbl_time.get_global_rect()) and not h.intersects(g.lbl_count.get_global_rect()), "%s: hearts top-left, clear of time/count/pause %s t%s c%s p%s" % [tag, str(h), str(g.lbl_time.get_global_rect()), str(g.lbl_count.get_global_rect()), str(p)])
+	check(p.position.y < vr.size.y * 0.2 and p.get_center().x > vr.size.x * 0.75 and not p.intersects(v) and not a.intersects(b), "%s: pause/speaker top-right, buttons don't overlap" % tag)
 
 func _layout_prepare(g) -> void:
 	g.set_level(0); g.reset_run()
@@ -308,6 +471,7 @@ func _layout_prepare(g) -> void:
 	g.results_box.visible = true
 	g.show_select()
 	g.results_box.visible = true
+	g.pause_box.visible = true
 
 var total_frames := 0
 
@@ -358,7 +522,7 @@ func _process(_delta: float) -> bool:
 		check(game.state == game.State.CLEARED, "autopilot clears level %d (clock %.2f s, stars %d, correct %d, wrong %d, miss %d)" % [n, game.clock(), Rules.stars_for(game.clock(), game.lvl), game.correct, game.wrong, game.missed])
 		check(game.wrong == 0 and game.missed == 0, "autopilot L%d makes no mistakes" % n)
 		check(game.logger.entries.size() == tgt, "dev logger recorded %d questions" % tgt)
-		check(FileAccess.file_exists("user://timing/runs.csv"), "timing CSV written")
+		check(FileAccess.file_exists("user://timing/runs_v2.csv"), "timing CSV written")
 		if auto_level == 0:
 			root.remove_child(game); game.free()
 			auto_level = 1

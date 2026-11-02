@@ -10,7 +10,12 @@ const DevLogger = preload("res://scripts/dev_logger.gd")
 const Assets = preload("res://scripts/asset_manifest.gd")
 const SaveData = preload("res://scripts/save_data.gd")
 
-enum State { SELECT, READY, RUNNING, CLEARED, FAILED }
+## HP hooks for later upgrades: (hp, max_hp, shield)
+signal hp_changed(hp: int, max_hp: int, shield: int)
+## Emitted when damage is taken (amount) or blocked by a shield (amount 0).
+signal damaged(amount: int, blocked: bool)
+
+enum State { SELECT, READY, RUNNING, PAUSED, CLEARED, FAILED }
 
 var level_id := "level_01"
 var level_index := 0
@@ -66,11 +71,23 @@ var stone_w := 1.2
 var row_spacing := 24.0
 var first_row := 30.0
 var spawn_ahead := 80.0
-var key_lane_needs_hold := false
 
 # touch
-var touch_id := -1
-var touch_anchor := Vector2.ZERO
+## index -> {"role": "accel"|"brake"|"swipe", "anchor": Vector2}
+var touches := {}
+var pause_count := 0
+# HP
+var hp := 3
+var max_hp := 3
+var base_max_hp := 3
+var max_hp_bonus := 0     # hook: upgrades add to this via set_max_hp_bonus()
+var shield := 0           # hook: a charm that blocks the next damage
+var miss_costs_heart := false
+var wrong_damage := 1
+var fail_reason := ""     # "", "time_up", "hp_out"
+var hearts_box: HBoxContainer
+var lbl_shield: Label
+var _js_visibility_cb   # keeps the JavaScriptBridge callback alive (web)
 
 # nodes
 var player: Node3D
@@ -100,6 +117,14 @@ var btn_select: Button
 var select_box: Control
 var select_list: VBoxContainer
 var level_buttons: Array = []
+var btn_accel: Panel
+var btn_brake: Panel
+var btn_pause: Panel
+var btn_voice: Panel
+var pause_box: Control
+var btn_resume: Button
+var btn_restart: Button
+var btn_quit: Button
 
 func _ready() -> void:
 	cfg = GameConfig.load_config()
@@ -114,7 +139,6 @@ func _ready() -> void:
 	swipe_min = float(L.get("swipe_min_px", 40))
 	player_w = float(L.get("player_width_m", 0.9))
 	stone_w = float(L.get("stone_width_m", 1.2))
-	key_lane_needs_hold = bool(L.get("keyboard_lane_change_requires_hold", false))
 	var T: Dictionary = cfg.get("track", {})
 	row_spacing = float(T.get("row_spacing_m", 24.0))
 	first_row = float(T.get("first_row_m", 30.0))
@@ -124,6 +148,7 @@ func _ready() -> void:
 	_build_world()
 	_build_hud()
 	_build_audio()
+	_setup_web_visibility()
 	set_level(level_index)
 	reset_run()
 	if not skip_select:
@@ -137,6 +162,10 @@ func set_level(i: int) -> void:
 	var H: Dictionary = cfg.get("hints", {})
 	hint_first_n = int(lvl.get("romaji_first_n", H.get("romaji_first_n", 3)))
 	hint_ratio = float(lvl.get("voice_only_after_progress", H.get("voice_only_after_progress", 0.5)))
+	var HP: Dictionary = cfg.get("hp", {})
+	base_max_hp = maxi(1, int(lvl.get("max_hp", HP.get("max_hp", 3))))
+	miss_costs_heart = bool(lvl.get("miss_costs_heart", HP.get("miss_costs_heart", false)))
+	wrong_damage = int(lvl.get("wrong_damage", HP.get("wrong_damage", 1)))
 
 # ---------------------------------------------------------------- build
 func lane_x(i: int) -> float:
@@ -252,10 +281,18 @@ func _panel_center() -> Array:
 func _build_hud() -> void:
 	hud = CanvasLayer.new()
 	add_child(hud)
-	lbl_time = _label(40);  _place(lbl_time, 0, 0, 0.5, 0, 24, 16, 0, 70)
+	lbl_time = _label(40);  _place(lbl_time, 0, 0, 0.5, 0, 24, 10, 0, 66)
 	lbl_count = _label(40); _place(lbl_count, 0, 0, 0.5, 0, 24, 70, 0, 124)
-	lbl_speed = _label(36); _place(lbl_speed, 0, 1, 0.6, 1, 24, -96, 0, -36)
-	lbl_combo = _label(52, HORIZONTAL_ALIGNMENT_RIGHT); _place(lbl_combo, 0.4, 1, 1, 1, 0, -110, -24, -36)
+	hearts_box = HBoxContainer.new()
+	hearts_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hearts_box.add_theme_constant_override("separation", 6)
+	hud.add_child(hearts_box)
+	_place(hearts_box, 0, 0, 0, 0, 24, 136, 380, 196)
+	lbl_shield = _label(34)
+	lbl_shield.add_theme_color_override("font_color", Color(0.6, 0.85, 1.0))
+	lbl_shield.reparent(hearts_box)
+	lbl_speed = _label(36, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_speed, 0.5, 1, 0.5, 1, -170, -90, 170, -36)
+	lbl_combo = _label(52, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_combo, 0.5, 1, 0.5, 1, -200, -170, 200, -100)
 	lbl_combo.add_theme_color_override("font_color", Color(1.0, 0.75, 0.3))
 	lbl_hint = _label(96, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_hint, 0, 0, 1, 0, 0, 130, 0, 250)
 	lbl_hint.add_theme_color_override("font_color", Color(1.0, 0.95, 0.6))
@@ -264,9 +301,31 @@ func _build_hud() -> void:
 	lbl_notice.add_theme_color_override("font_color", Color(0.6, 0.9, 1.0))
 	lbl_center = _label(34, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_center, 0, 0, 1, 1, 20, 120, -20, -110)
 	lbl_center.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	lbl_dev = _label(22, HORIZONTAL_ALIGNMENT_LEFT, Assets.FONT_UI); _place(lbl_dev, 1, 0, 1, 0, -330, 130, -10, 420)
+	lbl_dev = _label(22, HORIZONTAL_ALIGNMENT_LEFT, Assets.FONT_UI); _place(lbl_dev, 1, 0, 1, 0, -340, 240, -10, 530)
 	lbl_dev.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 	lbl_dev.add_theme_color_override("font_color", Color(0.6, 1.0, 0.6))
+	# touch buttons (hit-tested by hand in _input so several fingers work at once)
+	btn_brake = _touch_button("煞車", 40, Color(0.9, 0.3, 0.3)); _place(btn_brake, 0, 1, 0, 1, 24, -244, 224, -44)
+	btn_accel = _touch_button("加速", 48, Color(0.3, 0.85, 0.5)); _place(btn_accel, 1, 1, 1, 1, -264, -284, -24, -44)
+	btn_pause = _touch_button("II", 40, Color(0.7, 0.7, 0.9)); _place(btn_pause, 1, 0, 1, 0, -120, 16, -24, 112)
+	btn_voice = _touch_button("重播", 30, Color(1.0, 0.85, 0.4)); _place(btn_voice, 1, 0, 1, 0, -120, 124, -24, 220)
+	# pause menu
+	var pm := _panel_center()
+	pause_box = pm[0]
+	var pt := Label.new()
+	pt.text = "暫停"
+	pt.add_theme_font_override("font", Assets.FONT_HUD)
+	pt.add_theme_font_size_override("font_size", 52)
+	pt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pm[1].add_child(pt)
+	btn_resume = _button("繼續"); btn_restart = _button("重來"); btn_quit = _button("回選關")
+	for b in [btn_resume, btn_restart, btn_quit]:
+		b.custom_minimum_size = Vector2(320, 80)
+		pm[1].add_child(b)
+	btn_resume.pressed.connect(resume)
+	btn_restart.pressed.connect(func(): reset_run())
+	btn_quit.pressed.connect(show_select)
+	pause_box.visible = false
 	# results
 	var r := _panel_center()
 	results_box = r[0]
@@ -292,7 +351,159 @@ func _build_hud() -> void:
 	select_list = sp[1]
 	select_box.visible = false
 
+func _touch_button(text: String, size: int, col: Color) -> Panel:
+	var p := Panel.new()
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(col.r, col.g, col.b, 0.28)
+	sb.border_color = Color(col.r, col.g, col.b, 0.9)
+	sb.set_border_width_all(4)
+	sb.set_corner_radius_all(120)
+	p.add_theme_stylebox_override("panel", sb)
+	hud.add_child(p)
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_override("font", Assets.FONT_HUD)
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_outline_color", Color.BLACK)
+	l.add_theme_constant_override("outline_size", 6)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_place(l, 0, 0, 1, 1, 0, 0, 0, 0)
+	p.add_child(l)
+	return p
+
+func _set_btn_lit(p: Panel, lit: bool) -> void:
+	p.modulate = Color(1.6, 1.6, 1.6) if lit else Color.WHITE
+
+# ---------------------------------------------------------------- HP
+## Upgrade hook: extra max hearts (e.g. from an upgrade). refill = also fill to the new max.
+func set_max_hp_bonus(bonus: int, refill := true) -> void:
+	max_hp_bonus = maxi(0, bonus)
+	set_max_hp(base_max_hp + max_hp_bonus, refill)
+
+func set_max_hp(n: int, refill := false) -> void:
+	max_hp = maxi(1, n)
+	hp = max_hp if refill else mini(hp, max_hp)
+	_emit_hp()
+
+## Charm hook: each shield point blocks one future damage.
+func add_shield(n := 1) -> void:
+	shield = maxi(0, shield + n)
+	_emit_hp()
+
+## Heal hook (+1 heart etc.), capped at max_hp.
+func heal(n := 1) -> void:
+	hp = mini(max_hp, hp + maxi(0, n))
+	_emit_hp()
+
+## Applies damage. Returns true if a heart was actually lost. Ends the run at 0.
+func take_damage(n := 1) -> bool:
+	if n <= 0:
+		return false
+	if shield > 0:
+		shield -= 1
+		damaged.emit(0, true)
+		_emit_hp()
+		_hearts_fx(Color(0.6, 0.85, 1.0))
+		return false
+	hp = maxi(0, hp - n)
+	damaged.emit(n, false)
+	_emit_hp()
+	_hearts_fx(Color(1.0, 0.25, 0.25))
+	if hp <= 0 and state == State.RUNNING:
+		_finish(false, "hp_out")
+	return true
+
+func _emit_hp() -> void:
+	_rebuild_hearts()
+	hp_changed.emit(hp, max_hp, shield)
+
+func _rebuild_hearts() -> void:
+	if hearts_box == null:
+		return
+	for c in hearts_box.get_children():
+		if c != lbl_shield:
+			hearts_box.remove_child(c)
+			c.queue_free()
+	for i in max_hp:
+		var l := Label.new()
+		l.text = "♥" if i < hp else "♡"
+		l.add_theme_font_override("font", Assets.FONT_HUD)
+		l.add_theme_font_size_override("font_size", 44)
+		l.add_theme_color_override("font_color", Color(1.0, 0.35, 0.45) if i < hp else Color(0.6, 0.55, 0.65))
+		l.add_theme_color_override("font_outline_color", Color.BLACK)
+		l.add_theme_constant_override("outline_size", 6)
+		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hearts_box.add_child(l)
+	hearts_box.move_child(lbl_shield, -1)
+	lbl_shield.text = ("盾×%d" % shield) if shield > 0 else ""
+
+## Flash + shake of the heart icons only (never the camera / screen).
+func _hearts_fx(col: Color) -> void:
+	if hearts_box == null:
+		return
+	hearts_box.modulate = col * 1.6
+	var tw := create_tween()
+	tw.tween_property(hearts_box, "modulate", Color.WHITE, 0.4)
+	var x0 := 24.0
+	var sh := create_tween()
+	for d in [10.0, -8.0, 6.0, -4.0, 0.0]:
+		sh.tween_property(hearts_box, "offset_left", x0 + d, 0.04)
+	sh.parallel().tween_property(hearts_box, "offset_right", 380.0, 0.01)
+
+# ---------------------------------------------------------------- pause
+func pause_game() -> void:
+	if state != State.RUNNING:
+		return
+	state = State.PAUSED
+	pause_count += 1
+	_release_inputs()
+	voice.stream_paused = true
+	music.stream_paused = true
+	pause_box.visible = true
+
+func resume() -> void:
+	if state != State.PAUSED:
+		return
+	_release_inputs()
+	pause_box.visible = false
+	voice.stream_paused = false
+	music.stream_paused = false
+	state = State.RUNNING
+
+func _release_inputs() -> void:
+	ctrl.release_all()
+	touches.clear()
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT or what == NOTIFICATION_APPLICATION_PAUSED \
+			or what == NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+		if state == State.RUNNING:
+			pause_game()
+		else:
+			_release_inputs()
+
+func _setup_web_visibility() -> void:
+	if not OS.has_feature("web"):
+		return
+	var doc = JavaScriptBridge.get_interface("document")
+	if doc == null:
+		return
+	_js_visibility_cb = JavaScriptBridge.create_callback(_on_js_visibility)
+	doc.addEventListener("visibilitychange", _js_visibility_cb)
+
+func _on_js_visibility(_args) -> void:
+	var doc = JavaScriptBridge.get_interface("document")
+	if doc != null and doc.hidden:
+		_notification(NOTIFICATION_APPLICATION_FOCUS_OUT)
+
 func show_select() -> void:
+	pause_box.visible = false
+	voice.stream_paused = false
+	music.stream_paused = false
+	touches.clear()
 	state = State.SELECT
 	ctrl.reset()
 	if music.playing:
@@ -385,12 +596,21 @@ func reset_run() -> void:
 	next_row_dist = first_row
 	appearances.clear(); requeue.clear(); voice_only_announced = false
 	_set_combo(0); best_combo = 0
+	fail_reason = ""
+	shield = 0
+	max_hp = base_max_hp + max_hp_bonus
+	hp = max_hp
+	_emit_hp()
 	lbl_hint.text = ""; lbl_notice.text = ""
 	_spawn_rows()
 	state = State.READY
 	results_box.visible = false
 	select_box.visible = false
-	lbl_center.text = "%s\n\nHOLD = accelerate\nrelease = slow down\ndouble-tap & hold = brake\nswipe (while holding) = lane\n\nPC: Space/W hold, S brake, A/D lanes\nR = replay voice   F3 = dev timing   Esc = levels\n\nTap / Space to start" % str(lvl.get("name", "Level 1"))
+	pause_box.visible = false
+	voice.stream_paused = false
+	music.stream_paused = false
+	touches.clear()
+	lbl_center.text = "%s\n\n按住「加速」加速、按住「煞車」煞車\n都不按 = 自然減速\n左右滑動換線（按著加速時也可以）\n\nPC: W/Space 加速, S 煞車, A/D 換線\nE 重播  Esc/P 暫停  F3 dev\n\nTap / Space to start" % str(lvl.get("name", "Level 1"))
 	lbl_float.text = ""
 	if music.playing:
 		music.stop()
@@ -546,10 +766,12 @@ func _tick(dt: float) -> void:
 		var old = rows.pop_front()
 		if is_instance_valid(old.node):
 			old.node.queue_free()
+	if state != State.RUNNING:
+		return
 	if correct >= int(lvl.get("target_correct", 20)):
 		_finish(true)
 	elif clock() >= float(lvl.get("time_limit_s", 60.0)):
-		_finish(false)
+		_finish(false, "time_up")
 
 func _resolve(r) -> void:
 	r.resolved = true
@@ -566,6 +788,8 @@ func _resolve(r) -> void:
 		requeue.append(k)          # comes back later (next newly spawned row)
 		_set_combo(0)
 		_fx_miss(r)
+		if miss_costs_heart:
+			take_damage(1)
 	elif hit == r.target:
 		result = "correct"
 		correct += 1
@@ -579,10 +803,13 @@ func _resolve(r) -> void:
 		_set_combo(0)
 		_fx_wrong(r.stones[hit], r.stones[r.target])
 		_retry_in_next_row(r, k, r.target)
+		take_damage(wrong_damage)
 	logger.add(r.q, k, result, reaction, ctrl.kmh(), clock())
-	_activate_next()
+	if state == State.RUNNING:
+		_activate_next()
 
-func _finish(cleared: bool) -> void:
+func _finish(cleared: bool, reason := "") -> void:
+	fail_reason = "" if cleared else (reason if reason != "" else "time_up")
 	state = State.CLEARED if cleared else State.FAILED
 	result_time = 0.0
 	ctrl.reset()
@@ -596,18 +823,20 @@ func _finish(cleared: bool) -> void:
 			_stars_text(stars), clock(), elapsed, penalty, wrong, missed, best_combo, "\n新紀錄！" if new_best else ""]
 		sfx("shatter", 0.8, 2.0)
 	else:
-		lbl_result.text = "TIME UP\n%d / %d" % [correct, int(lvl.get("target_correct", 20))]
+		lbl_result.text = "%s\n%d / %d" % ["體力耗盡" if fail_reason == "hp_out" else "時間到", correct, int(lvl.get("target_correct", 20))]
 		sfx("back")
 	lbl_center.text = ""
 	lbl_hint.text = ""
 	btn_next.visible = level_index + 1 < levels.size()
 	btn_next.disabled = not can_go_next()
+	pause_box.visible = false
+	touches.clear()
 	results_box.visible = true
 	if dev_mode:
-		last_saved_path = logger.save("clear" if cleared else "fail", elapsed, clock(), stars)
+		last_saved_path = logger.save("clear" if cleared else fail_reason, elapsed, clock(), stars, hp)
 		print("[dev] timing saved: ", last_saved_path)
-	print("[result] %s %s clock=%.3f elapsed=%.3f penalty=%.1f correct=%d wrong=%d miss=%d stars=%d" % [
-		level_id, "CLEAR" if cleared else "FAIL", clock(), elapsed, penalty, correct, wrong, missed, stars])
+	print("[result] %s %s%s clock=%.3f elapsed=%.3f penalty=%.1f correct=%d wrong=%d miss=%d stars=%d" % [
+		level_id, "CLEAR" if cleared else "FAIL", "" if cleared else "(" + fail_reason + ")", clock(), elapsed, penalty, correct, wrong, missed, stars])
 
 # ---------------------------------------------------------------- feedback
 func _float_text(t: String, c: Color) -> void:
@@ -714,6 +943,11 @@ func _update_hud() -> void:
 	lbl_combo.pivot_offset = lbl_combo.size * 0.5
 	var in_game := state != State.SELECT
 	lbl_time.visible = in_game; lbl_count.visible = in_game; lbl_speed.visible = in_game
+	var playing := state == State.RUNNING or state == State.READY
+	for b in [btn_accel, btn_brake, btn_pause, btn_voice]:
+		b.visible = playing
+	_set_btn_lit(btn_accel, ctrl.is_accelerating())
+	_set_btn_lit(btn_brake, ctrl.is_braking())
 	var limit := float(lvl.get("time_limit_s", 60.0))
 	lbl_time.text = "TIME %.1f / %d" % [clock(), int(limit)]
 	lbl_count.text = "%d / %d" % [correct, int(lvl.get("target_correct", 20))]
@@ -730,65 +964,115 @@ func _update_hud() -> void:
 			("saved: " + last_saved_path.get_file()) if last_saved_path != "" else ""]
 
 # ---------------------------------------------------------------- input
-func _primary_down() -> void:
-	if state == State.READY:
-		start_run()
-	elif state != State.RUNNING:
-		return   # select / results screens use their buttons (keyboard shortcuts below)
-	ctrl.press()
-
-func _primary_up() -> void:
-	ctrl.release()
-
 func change_lane(dir: int) -> void:
 	var n := clampi(lane + dir, 0, lane_count - 1)
 	if n != lane:
 		lane = n
 		sfx("shift", 1.0, -4.0)
 
-func _unhandled_input(ev: InputEvent) -> void:
+func replay_voice() -> void:
+	if state == State.RUNNING:
+		var r = active_row()
+		if r != null:
+			play_voice(r)
+
+func _hit(c: Control, pos: Vector2) -> bool:
+	return c.visible and c.get_global_rect().grow(8.0).has_point(pos)
+
+func _accel_touch_count() -> int:
+	var n := 0
+	for t in touches.values():
+		if t.role == "accel": n += 1
+	return n
+
+func _brake_touch_count() -> int:
+	var n := 0
+	for t in touches.values():
+		if t.role == "brake": n += 1
+	return n
+
+## Multi-touch: each finger is tracked by index. A finger that starts on a
+## button drives that button; any other finger swipes. The accelerate finger
+## can also swipe sideways to change lanes while staying on the gas.
+func _touch(ev: InputEvent) -> void:
 	if ev is InputEventScreenTouch:
-		if state == State.SELECT or state == State.CLEARED or state == State.FAILED:
+		if ev.pressed:
+			if state == State.RUNNING and _hit(btn_pause, ev.position):
+				pause_game(); return
+			if state == State.RUNNING and _hit(btn_voice, ev.position):
+				replay_voice(); return
+			if state == State.READY:
+				start_run()
+			if state != State.RUNNING:
+				return
+			var role := "swipe"
+			if _hit(btn_accel, ev.position): role = "accel"
+			elif _hit(btn_brake, ev.position): role = "brake"
+			touches[ev.index] = {"role": role, "anchor": ev.position}
+			if role == "accel": ctrl.press()
+			elif role == "brake": ctrl.brake_press()
+		else:
+			if not touches.has(ev.index):
+				return
+			var t: Dictionary = touches[ev.index]
+			touches.erase(ev.index)
+			if t.role == "accel" and _accel_touch_count() == 0: ctrl.release()
+			elif t.role == "brake" and _brake_touch_count() == 0: ctrl.brake_release()
+	elif ev is InputEventScreenDrag:
+		if state != State.RUNNING or not touches.has(ev.index):
 			return
-		if ev.pressed and touch_id == -1:
-			touch_id = ev.index
-			touch_anchor = ev.position
-			_primary_down()
-		elif not ev.pressed and ev.index == touch_id:
-			touch_id = -1
-			_primary_up()
-	elif ev is InputEventScreenDrag and ev.index == touch_id:
-		if ctrl.holding and state == State.RUNNING:
-			var dx: float = ev.position.x - touch_anchor.x
-			if absf(dx) >= swipe_min:
-				change_lane(1 if dx > 0 else -1)
-				touch_anchor = ev.position
-	elif ev is InputEventKey and not ev.echo:
-		match ev.keycode:
-			KEY_SPACE, KEY_W, KEY_UP, KEY_ENTER:
-				if ev.pressed and (state == State.CLEARED or state == State.FAILED):
+		var t: Dictionary = touches[ev.index]
+		if t.role == "brake":
+			return
+		var dx: float = ev.position.x - t.anchor.x
+		if absf(dx) >= swipe_min:
+			change_lane(1 if dx > 0 else -1)
+			t.anchor = ev.position
+
+func _input(ev: InputEvent) -> void:
+	if ev is InputEventScreenTouch or ev is InputEventScreenDrag:
+		if state == State.READY or state == State.RUNNING:
+			_touch(ev)
+			get_viewport().set_input_as_handled()
+
+func _unhandled_input(ev: InputEvent) -> void:
+	if not (ev is InputEventKey) or ev.echo:
+		return
+	var in_result := state == State.CLEARED or state == State.FAILED
+	match ev.keycode:
+		KEY_SPACE, KEY_W, KEY_UP, KEY_ENTER:
+			if ev.pressed:
+				if in_result:
 					if result_time > 0.4: reset_run()
-				elif ev.pressed and state == State.SELECT:
-					pass
-				elif ev.pressed: _primary_down()
-				else: _primary_up()
-			KEY_N:
-				if ev.pressed and (state == State.CLEARED or state == State.FAILED): go_next_level()
-			KEY_ESCAPE, KEY_B:
-				if ev.pressed and state != State.RUNNING: show_select()
-			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9:
-				if ev.pressed and state == State.SELECT: choose_level(ev.keycode - KEY_1)
-			KEY_S, KEY_DOWN:
-				ctrl.key_brake = ev.pressed
-			KEY_A, KEY_LEFT:
-				if ev.pressed and state == State.RUNNING and (ctrl.holding or not key_lane_needs_hold):
-					change_lane(-1)
-			KEY_D, KEY_RIGHT:
-				if ev.pressed and state == State.RUNNING and (ctrl.holding or not key_lane_needs_hold):
-					change_lane(1)
-			KEY_R:
-				if ev.pressed and state == State.RUNNING:
-					var r = active_row()
-					if r != null: play_voice(r)
-			KEY_F3:
-				if ev.pressed: dev_mode = not dev_mode
+				elif state == State.READY:
+					start_run(); ctrl.press()
+				elif state == State.RUNNING:
+					ctrl.press()
+			else:
+				ctrl.release()
+		KEY_S, KEY_DOWN:
+			if ev.pressed and state == State.RUNNING: ctrl.brake_press()
+			elif not ev.pressed: ctrl.brake_release()
+		KEY_A, KEY_LEFT:
+			if ev.pressed and state == State.RUNNING: change_lane(-1)
+		KEY_D, KEY_RIGHT:
+			if ev.pressed and state == State.RUNNING: change_lane(1)
+		KEY_E:
+			if ev.pressed: replay_voice()
+		KEY_ESCAPE, KEY_P:
+			if ev.pressed:
+				if state == State.RUNNING: pause_game()
+				elif state == State.PAUSED: resume()
+				elif ev.keycode == KEY_ESCAPE: show_select()
+		KEY_R:
+			if ev.pressed and state == State.PAUSED: reset_run()
+		KEY_Q:
+			if ev.pressed and state == State.PAUSED: show_select()
+		KEY_B:
+			if ev.pressed and (in_result or state == State.READY): show_select()
+		KEY_N:
+			if ev.pressed and in_result: go_next_level()
+		KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9:
+			if ev.pressed and state == State.SELECT: choose_level(ev.keycode - KEY_1)
+		KEY_F3:
+			if ev.pressed: dev_mode = not dev_mode
