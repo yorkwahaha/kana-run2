@@ -6,4 +6,7 @@ if not exist "%GODOT%" set "GODOT=I:\Projects\Godot_v4.7.2\Godot_v4.7.2-stable_w
 if not exist build\web mkdir build\web
 "%GODOT%" --headless --path "%CD%" --import
 "%GODOT%" --headless --path "%CD%" --export-release "Web" build/web/index.html
+if errorlevel 1 exit /b %ERRORLEVEL%
+python tools\cachebust.py
+for %%F in (build\web\index.pck) do echo pck size: %%~zF bytes
 exit /b %ERRORLEVEL%

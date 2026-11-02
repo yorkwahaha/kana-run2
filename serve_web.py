@@ -46,7 +46,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Cross-Origin-Opener-Policy", "same-origin")
         self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
         self.send_header("Cross-Origin-Resource-Policy", "cross-origin")
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        if self.path.split("?")[0] in ("/", "/index.html"):
+            # 清掉手機上殘留的舊版快取（Chrome/Firefox/新 Safari 支援）
+            self.send_header("Clear-Site-Data", '"cache"')
         super().end_headers()
 
     def log_message(self, fmt, *args):

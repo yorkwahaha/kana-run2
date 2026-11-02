@@ -82,6 +82,23 @@ Godot **4.7.2**（`I:\Projects\Godot_v4.7.2`），**Mobile** 渲染器（Web 匯
 - `runs_v4.csv`：每局一行摘要（模式、距離、題數、獲得點數、結果 clear／time_up／hp_out、通關時間、星數、對/錯/漏、平均反應、剩餘體力）
 畫面右上角同時顯示即時數據。
 
+## 美術素材與授權
+
+- **美術：屁卡手手繪**（`/workspace/kana-run-2.0/art/` 交付包）
+  - batch01：天空、跑道、石板、HUD、護盾特效
+  - batch02：無字 UI、粒子（花瓣／火花／速度線）
+  - batch03 + batch07/props：跑道兩側道具（房子、商店、櫻花、長椅、販賣機…）
+  - batch04：暫停、選關、結算、倒數 GO、App 圖示
+  - batch07：跑者 9 組 sprite sheet + JSON（錨點、回切幀）
+  - 版權屬屁卡手／本專案，僅供 Kana Run 使用。
+- **字型**
+  - Zen Maru Gothic Bold（石板假名、選關徽章）：SIL Open Font License 1.1，`art/fonts/OFL-ZenMaruGothic.txt`
+  - Noto Sans TC（HUD 子集）：SIL Open Font License 1.1
+- **匯入流程**：`python3 tools/import_art.py <art 交付資料夾>` 會縮圖、產生 `.import`（有損壓縮控制 pck 大小）與 `scripts/art_manifest.gd`。執行期載入的素材全部列在 manifest。
+- 基準解析度 1080×1920（canvas_items stretch, aspect expand）；3D 玩法不變，美術貼在 quad／Sprite3D 上。
+- 跑者呼吸、換道側移在程式；答錯白閃是 shader，不震螢幕。
+- Web 快取破壞：`export-web.bat` 會呼叫 `tools/cachebust.py` 在 index.html 加 `?v=時間戳`；`serve_web.py` 送 no-store / Clear-Site-Data 標頭。
+
 ## 結構
 ```
 config/game_config.json   所有可調參數與關卡資料

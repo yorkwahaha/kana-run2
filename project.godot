@@ -7,12 +7,12 @@ config/name="Kana Run 2.0"
 config/description="Kana Run 2.0 - level 1 prototype (speed control + 3 lanes)"
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
-config/icon="res://icon.svg"
+config/icon="res://art/icon/icon_512.png"
 
 [display]
 
-window/size/viewport_width=720
-window/size/viewport_height=1280
+window/size/viewport_width=1080
+window/size/viewport_height=1920
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 window/handheld/orientation=1
