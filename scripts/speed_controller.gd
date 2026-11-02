@@ -22,14 +22,28 @@ func configure(c: Dictionary) -> void:
 	coast_time = maxf(0.05, float(c.get("coast_time_s", 5.0)))
 	double_tap_window = float(c.get("double_tap_window_s", 0.28))
 
-func press() -> void:
-	tap_brake = _since_release <= double_tap_window
-	holding = true
+var _released_after_press := false   # only a real press->release can be a double-tap's first tap
 
-func release() -> void:
+## Back to rest: no pending double-tap. Call on (re)start.
+func reset() -> void:
+	speed = 0.0
 	holding = false
 	tap_brake = false
-	_since_release = 0.0
+	key_brake = false
+	_since_release = 999.0
+	_released_after_press = false
+
+func press() -> void:
+	tap_brake = _released_after_press and _since_release <= double_tap_window
+	holding = true
+	_released_after_press = false
+
+func release() -> void:
+	if holding:
+		_released_after_press = true
+		_since_release = 0.0
+	holding = false
+	tap_brake = false
 
 func is_braking() -> bool:
 	return tap_brake or key_brake

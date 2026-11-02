@@ -224,7 +224,7 @@ func reset_run() -> void:
 		rng.randomize()
 	elapsed = 0.0; penalty = 0.0; correct = 0; wrong = 0; missed = 0
 	player_dist = 0.0; lane = 1; player_x = lane_x(lane); q_counter = 0; last_target = ""
-	ctrl.speed = 0.0; ctrl.release(); ctrl.key_brake = false
+	ctrl.reset()
 	next_row_dist = first_row
 	_spawn_rows()
 	state = State.READY
@@ -358,7 +358,7 @@ func _resolve(r) -> void:
 func _finish(cleared: bool) -> void:
 	state = State.CLEARED if cleared else State.FAILED
 	result_time = 0.0
-	ctrl.release()
+	ctrl.reset()
 	music.stop()
 	var stars := Rules.stars_for(clock(), lvl) if cleared else 0
 	var star_txt := "STARS %d / 3" % stars
