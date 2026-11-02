@@ -59,9 +59,7 @@ func unit_tests() -> void:
 ## Regression: first accelerate press from rest must accelerate (was braking).
 func regression_tests() -> void:
 	print("regression: first press from rest")
-	var g = load("res://scenes/main.tscn").instantiate()
-	g.rng_seed = 3
-	root.add_child(g)
+	var g = reg_game
 	for keycode in [KEY_SPACE, KEY_W]:
 		g.reset_run()
 		var ev := InputEventKey.new(); ev.keycode = keycode; ev.pressed = true
@@ -99,9 +97,17 @@ func regression_tests() -> void:
 	root.remove_child(g)
 	g.free()
 
+var reg_game
+
 func _initialize() -> void:
 	unit_tests()
-	regression_tests()
+	# nodes only get _ready() once the main loop runs, so the scene-based
+	# tests start from _process (frame 1).
+	reg_game = load("res://scenes/main.tscn").instantiate()
+	reg_game.rng_seed = 3
+	root.add_child(reg_game)
+
+func _start_autopilot() -> void:
 	print("autopilot run")
 	game = load("res://scenes/main.tscn").instantiate()
 	game.autopilot = true
@@ -111,7 +117,11 @@ func _initialize() -> void:
 
 func _process(_delta: float) -> bool:
 	frames += 1
-	if frames == 2:
+	if frames == 1:
+		regression_tests()
+		_start_autopilot()
+		return false
+	if frames == 3:
 		game.start_run()
 	if game.state == game.State.CLEARED or game.state == game.State.FAILED or frames > 60 * 90:
 		check(game.state == game.State.CLEARED, "autopilot clears level 1 (clock %.2f s, correct %d, wrong %d, miss %d)" % [game.clock(), game.correct, game.wrong, game.missed])
