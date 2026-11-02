@@ -40,6 +40,13 @@ var q_counter := 0
 var last_target := ""
 var result_time := 0.0
 var last_saved_path := ""
+var combo := 0
+var best_combo := 0
+var appearances := {}
+var voice_only_announced := false
+var requeue: Array = []
+var hint_first_n := 3
+var hint_ratio := 0.5
 
 # tunables (cached)
 var lane_w := 2.2
@@ -74,6 +81,9 @@ var lbl_speed: Label
 var lbl_center: Label
 var lbl_dev: Label
 var lbl_float: Label
+var lbl_hint: Label
+var lbl_combo: Label
+var lbl_notice: Label
 
 func _ready() -> void:
 	cfg = GameConfig.load_config()
@@ -91,6 +101,9 @@ func _ready() -> void:
 	row_spacing = float(T.get("row_spacing_m", 24.0))
 	first_row = float(T.get("first_row_m", 30.0))
 	spawn_ahead = float(T.get("spawn_ahead_m", 80.0))
+	var H: Dictionary = cfg.get("hints", {})
+	hint_first_n = int(H.get("romaji_first_n", 3))
+	hint_ratio = float(H.get("voice_only_after_progress", 0.5))
 	dev_mode = force_dev_mode or bool(cfg.get("dev", {}).get("timing_mode", false)) \
 		or OS.get_cmdline_user_args().has("--dev")
 	_build_world()
@@ -187,6 +200,18 @@ func _build_hud() -> void:
 	lbl_center.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	lbl_float = _label(64, Vector2(0, 300), HORIZONTAL_ALIGNMENT_CENTER)
 	lbl_float.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	lbl_hint = _label(96, Vector2(0, 150), HORIZONTAL_ALIGNMENT_CENTER)
+	lbl_hint.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	lbl_hint.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_hint.add_theme_color_override("font_color", Color(1.0, 0.95, 0.6))
+	lbl_combo = _label(56, Vector2(440, 1080))
+	lbl_combo.size = Vector2(260, 80)
+	lbl_combo.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_combo.add_theme_color_override("font_color", Color(1.0, 0.75, 0.3))
+	lbl_notice = _label(72, Vector2(0, 560), HORIZONTAL_ALIGNMENT_CENTER)
+	lbl_notice.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	lbl_notice.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_notice.add_theme_color_override("font_color", Color(0.6, 0.9, 1.0))
 	lbl_dev = _label(22, Vector2(380, 20))
 	lbl_dev.add_theme_color_override("font_color", Color(0.6, 1.0, 0.6))
 
@@ -226,6 +251,9 @@ func reset_run() -> void:
 	player_dist = 0.0; lane = 1; player_x = lane_x(lane); q_counter = 0; last_target = ""
 	ctrl.reset()
 	next_row_dist = first_row
+	appearances.clear(); requeue.clear(); voice_only_announced = false
+	_set_combo(0); best_combo = 0
+	lbl_hint.text = ""; lbl_notice.text = ""
 	_spawn_rows()
 	state = State.READY
 	lbl_center.text = "%s\n\nHOLD = accelerate\nrelease = slow down\ndouble-tap & hold = brake\nswipe (while holding) = lane\n\nPC: Space/W hold, S brake, A/D lanes\nR = replay voice   F3 = dev timing\n\nTap / Space to start" % str(lvl.get("name", "Level 1"))
@@ -247,8 +275,13 @@ func clock() -> float:
 	return elapsed + penalty
 
 func _spawn_rows() -> void:
+	var pool: Array = lvl.get("kana", ["あ"])
 	while next_row_dist < player_dist + spawn_ahead:
-		var r := Rules.make_row(lvl.get("kana", ["あ"]), last_target, rng, lane_count)
+		var r: Dictionary
+		if requeue.size() > 0:
+			r = Rules.make_row_with_target(pool, requeue.pop_front(), -1, rng, lane_count)
+		else:
+			r = Rules.make_row(pool, last_target, rng, lane_count)
 		last_target = r.kana[r.target]
 		var node := Node3D.new()
 		node.position = Vector3(0, 0, -next_row_dist)
@@ -259,11 +292,10 @@ func _spawn_rows() -> void:
 			var bm := BoxMesh.new()
 			bm.size = Vector3(stone_w, 1.8, 0.5)
 			st.mesh = bm
-			var m := _mat(Color(0.55, 0.52, 0.6), true)
-			st.material_override = m
+			st.material_override = _mat(Color(0.55, 0.52, 0.6), true)
 			st.position = Vector3(lane_x(i), 0.9, 0)
 			var lab := Label3D.new()
-			lab.text = r.kana[i]
+			lab.name = "Kana"
 			lab.font = Assets.FONT_KANA
 			lab.font_size = 160
 			lab.pixel_size = 0.006
@@ -272,9 +304,29 @@ func _spawn_rows() -> void:
 			st.add_child(lab)
 			node.add_child(st)
 			stones.append(st)
-		rows.append({"dist": next_row_dist, "kana": r.kana, "target": r.target, "node": node,
-			"stones": stones, "resolved": false, "voice_t": -1.0, "q": 0})
+		var row := {"dist": next_row_dist, "kana": r.kana, "target": r.target, "node": node,
+			"stones": stones, "resolved": false, "voice_t": -1.0, "q": 0, "hint": false, "retry": false}
+		_apply_row_labels(row)
+		rows.append(row)
 		next_row_dist += row_spacing
+
+func _apply_row_labels(row: Dictionary) -> void:
+	for i in row.stones.size():
+		(row.stones[i].get_node("Kana") as Label3D).text = row.kana[i]
+
+## Wrong hit: the next row becomes the same question with the correct kana in a different lane.
+func _retry_in_next_row(after_row: Dictionary, kana: String, avoid_lane: int) -> void:
+	var idx := rows.find(after_row)
+	for j in range(idx + 1, rows.size()):
+		var nxt: Dictionary = rows[j]
+		if nxt.resolved or nxt.voice_t >= 0.0:
+			continue
+		var r := Rules.make_row_with_target(lvl.get("kana", ["あ"]), kana, avoid_lane, rng, lane_count)
+		nxt.kana = r.kana
+		nxt.target = r.target
+		nxt.retry = true
+		_apply_row_labels(nxt)
+		return
 
 func active_row():
 	for r in rows:
@@ -289,7 +341,39 @@ func _activate_next() -> void:
 	q_counter += 1
 	r.q = q_counter
 	r.voice_t = elapsed
+	var k: String = r.kana[r.target]
+	var seen: int = appearances.get(k, 0)
+	appearances[k] = seen + 1
+	var progress := float(correct) / maxf(1.0, float(lvl.get("target_correct", 20)))
+	r.hint = Rules.hint_visible(seen, hint_first_n, progress, hint_ratio)
+	if progress >= hint_ratio and not voice_only_announced:
+		voice_only_announced = true
+		_notice("聽音模式")
+	lbl_hint.text = _romaji(k) if r.hint else "?"
+	lbl_hint.modulate.a = 1.0 if r.hint else 0.6
 	play_voice(r)
+
+func _romaji(k: String) -> String:
+	var idx: int = lvl.get("kana", []).find(k)
+	return lvl.get("romaji", [])[idx] if idx >= 0 else ""
+
+func _notice(t: String) -> void:
+	lbl_notice.text = t
+	lbl_notice.modulate.a = 1.0
+	lbl_notice.scale = Vector2(1.4, 1.4)
+	var tw := create_tween()
+	tw.tween_property(lbl_notice, "scale", Vector2.ONE, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(lbl_notice, "modulate:a", 0.0, 0.6).set_delay(1.4)
+
+func _set_combo(v: int) -> void:
+	combo = v
+	best_combo = maxi(best_combo, combo)
+	lbl_combo.text = ("%d 連擊" % combo) if combo >= 2 else ""
+	if combo >= 2:
+		lbl_combo.pivot_offset = lbl_combo.size * 0.5
+		lbl_combo.scale = Vector2(1.5, 1.5)
+		var tw := create_tween()
+		tw.tween_property(lbl_combo, "scale", Vector2.ONE, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func play_voice(r) -> void:
 	var idx: int = lvl.get("kana", []).find(r.kana[r.target])
@@ -337,22 +421,28 @@ func _resolve(r) -> void:
 		lane_xs.append(lane_x(i))
 	var hit := Rules.hit_lane(player_x, lane_xs, player_w, stone_w)
 	var reaction: float = elapsed - float(r.voice_t)
+	var k: String = r.kana[r.target]
 	var result := "miss"
 	if hit == -1:
 		missed += 1
 		penalty += float(lvl.get("miss_penalty_s", 1.0))
+		requeue.append(k)          # comes back later (next newly spawned row)
+		_set_combo(0)
 		_fx_miss(r)
 	elif hit == r.target:
 		result = "correct"
 		correct += 1
+		_set_combo(combo + 1)
 		_fx_correct(r.stones[hit])
 	else:
 		result = "wrong"
 		wrong += 1
 		penalty += float(lvl.get("wrong_penalty_s", 2.0))
 		ctrl.scale_speed(float(cfg.get("speed", {}).get("wrong_hit_speed_factor", 0.5)))
+		_set_combo(0)
 		_fx_wrong(r.stones[hit], r.stones[r.target])
-	logger.add(r.q, r.kana[r.target], result, reaction, ctrl.kmh(), clock())
+		_retry_in_next_row(r, k, r.target)
+	logger.add(r.q, k, result, reaction, ctrl.kmh(), clock())
 	_activate_next()
 
 func _finish(cleared: bool) -> void:
@@ -363,7 +453,7 @@ func _finish(cleared: bool) -> void:
 	var stars := Rules.stars_for(clock(), lvl) if cleared else 0
 	var star_txt := "STARS %d / 3" % stars
 	if cleared:
-		lbl_center.text = "CLEAR!\n%s\n\nTime %.2f s\n(run %.2f + penalty %.1f)\nwrong %d   miss %d\n\nTap / Space to retry" % [star_txt, clock(), elapsed, penalty, wrong, missed]
+		lbl_center.text = "CLEAR!\n%s\n\nTime %.2f s\n(run %.2f + penalty %.1f)\nwrong %d   miss %d\nbest combo %d\n\nTap / Space to retry" % [star_txt, clock(), elapsed, penalty, wrong, missed, best_combo]
 		sfx("shatter", 0.8, 2.0)
 	else:
 		lbl_center.text = "TIME UP\n%d / %d\n\nTap / Space to retry" % [correct, int(lvl.get("target_correct", 20))]

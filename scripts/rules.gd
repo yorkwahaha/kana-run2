@@ -42,3 +42,31 @@ static func make_row(pool: Array, prev_target: String, rng: RandomNumberGenerato
 		var j := rng.randi_range(0, i)
 		var t = row[i]; row[i] = row[j]; row[j] = t
 	return {"kana": row, "target": row.find(target)}
+
+## Row whose target is `target`, placed in any lane except avoid_lane (-1 = any).
+static func make_row_with_target(pool: Array, target: String, avoid_lane: int, rng: RandomNumberGenerator, lanes := 3) -> Dictionary:
+	var others := pool.duplicate()
+	others.erase(target)
+	for i in range(others.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var t = others[i]; others[i] = others[j]; others[j] = t
+	var n := mini(lanes, others.size() + 1)
+	var allowed: Array = []
+	for i in n:
+		if i != avoid_lane:
+			allowed.append(i)
+	if allowed.is_empty():
+		allowed.append(0)
+	var tl: int = allowed[rng.randi_range(0, allowed.size() - 1)]
+	var row: Array = []
+	var oi := 0
+	for i in n:
+		if i == tl:
+			row.append(target)
+		else:
+			row.append(others[oi]); oi += 1
+	return {"kana": row, "target": tl}
+
+## Romaji hint shown for a kana's first N appearances, and only before progress reaches ratio.
+static func hint_visible(seen_before: int, first_n: int, progress: float, ratio: float) -> bool:
+	return seen_before < first_n and progress < ratio

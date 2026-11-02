@@ -21,6 +21,10 @@
     "first_row_m": 30.0,
     "spawn_ahead_m": 80.0
   },
+  "hints": {
+    "romaji_first_n": 3,
+    "voice_only_after_progress": 0.5
+  },
   "feedback": {
     "screen_shake_on_normal_hit": false,
     "glow_strength": 4.0,

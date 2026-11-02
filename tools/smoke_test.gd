@@ -5,6 +5,7 @@ extends SceneTree
 
 const SpeedController = preload("res://scripts/speed_controller.gd")
 const Rules = preload("res://scripts/rules.gd")
+const Assets = preload("res://scripts/asset_manifest.gd")
 
 var game
 var frames := 0
@@ -94,8 +95,81 @@ func regression_tests() -> void:
 	var c2 = SpeedController.new()
 	c2.release(); c2.press()
 	check(not c2.is_braking(), "release without prior press is not a first tap")
+	feature_tests(g)
 	root.remove_child(g)
 	g.free()
+
+func _answer(g, mode: String) -> void:
+	var r = g.active_row()
+	g.player_dist = r.dist
+	if mode == "correct":
+		g.player_x = g.lane_x(r.target)
+	elif mode == "wrong":
+		g.player_x = g.lane_x((r.target + 1) % 3)
+	else:
+		g.player_x = g.lane_x(0) + g.lane_w * 0.5   # gap between stones
+	g._resolve(r)
+	g._spawn_rows()
+
+func feature_tests(g) -> void:
+	print("hints / voice-only mode")
+	check(Rules.hint_visible(0, 3, 0.0, 0.5) and Rules.hint_visible(2, 3, 0.45, 0.5), "hint_visible: shown for first N, before ratio")
+	check(not Rules.hint_visible(3, 3, 0.0, 0.5) and not Rules.hint_visible(0, 3, 0.5, 0.5), "hint_visible: hidden after N or at ratio")
+	g.reset_run(); g.start_run()
+	var seen := {}
+	var hint_ok := true
+	var notice_before := false
+	while g.correct < 10:
+		var r = g.active_row()
+		var k: String = r.kana[r.target]
+		var n: int = seen.get(k, 0)
+		if r.hint != (n < 3): hint_ok = false
+		if r.hint and g.lbl_hint.text != g._romaji(k): hint_ok = false
+		seen[k] = n + 1
+		if g.voice_only_announced: notice_before = true
+		_answer(g, "correct")
+	check(hint_ok, "romaji hint shown exactly for each kana's first 3 appearances")
+	check(not notice_before, "no voice-only notice before 50%")
+	var r2 = g.active_row()
+	check(not r2.hint and g.lbl_hint.text == "?", "after 50%% progress the question is voice-only")
+	check(g.voice_only_announced and g.lbl_notice.text == "聽音模式", "「聽音模式」notice shown on switch")
+	check(Assets.FONT_HUD.has_char("模".unicode_at(0)) and Assets.FONT_HUD.has_char("聽".unicode_at(0)) and Assets.FONT_HUD.has_char("擊".unicode_at(0)), "HUD font has 聽音模式 / 連擊 glyphs")
+	print("wrong-hit retry / miss re-queue / combo")
+	g.reset_run(); g.start_run()
+	_answer(g, "correct"); _answer(g, "correct")
+	check(g.combo == 2 and g.lbl_combo.text == "2 連擊", "combo counts consecutive correct (2)")
+	var r = g.active_row()
+	var k: String = r.kana[r.target]
+	var old_lane: int = r.target
+	_answer(g, "wrong")
+	check(g.combo == 0, "wrong hit resets combo")
+	var nx = g.active_row()
+	check(nx.kana[nx.target] == k and nx.target != old_lane and nx.retry, "wrong hit: same kana comes back in a different lane")
+	var lab_ok := true
+	for i in 3:
+		if (nx.stones[i].get_node("Kana") as Label3D).text != nx.kana[i]: lab_ok = false
+	check(lab_ok and nx.kana.size() == 3 and nx.kana[0] != nx.kana[1] and nx.kana[1] != nx.kana[2] and nx.kana[0] != nx.kana[2], "retry row labels updated, 3 distinct kana")
+	_answer(g, "correct")
+	check(g.combo == 1, "combo restarts at 1")
+	var mr = g.active_row()
+	var mk: String = mr.kana[mr.target]
+	var before_rows: int = g.rows.size()
+	_answer(g, "miss")
+	check(g.combo == 0, "miss also resets combo")
+	check(g.missed == 1, "dodging all three counts as miss")
+	check(g.rows.size() > before_rows, "a new row spawned after the miss")
+	var nr = g.rows[before_rows] if g.rows.size() > before_rows else null
+	var came_back: bool = nr != null and nr.kana[nr.target] == mk and nr.voice_t < 0.0
+	check(came_back and g.requeue.is_empty(), "missed kana re-queued into a later row")
+	print("random play terminates")
+	var rng := RandomNumberGenerator.new(); rng.seed = 11
+	g.reset_run(); g.start_run()
+	var steps := 0
+	while g.correct < 20 and steps < 500:
+		var p := rng.randf()
+		_answer(g, "correct" if p < 0.6 else ("wrong" if p < 0.85 else "miss"))
+		steps += 1
+	check(g.correct >= 20 and steps < 500, "mixed correct/wrong/miss still reaches 20 correct (%d rows)" % steps)
 
 var reg_game
 

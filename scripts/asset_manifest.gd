@@ -26,4 +26,7 @@ const MUSIC := {
 
 const FONT_KANA := preload("res://assets/fonts/bold.ttf")
 const FONT_UI := preload("res://assets/fonts/ui.ttf")
+## Noto Sans TC (OFL) subset, weight 800: ASCII + kana + HUD Chinese (聽音模式, 連擊 ...).
+## The copied 1.0 subset fonts lack 模. Regenerate with tools/make_hud_font.py.
+const FONT_HUD := preload("res://assets/fonts/hud_cjk.ttf")
 const CONFIG_JSON := preload("res://config/game_config.json")
