@@ -97,7 +97,7 @@ Godot **4.7.2**（`I:\Projects\Godot_v4.7.2`），**Mobile** 渲染器（Web 匯
 - **匯入流程**：`python3 tools/import_art.py <art 交付資料夾>` 會縮圖、產生 `.import`（有損壓縮控制 pck 大小）與 `scripts/art_manifest.gd`。執行期載入的素材全部列在 manifest。
 - 基準解析度 1080×1920（canvas_items stretch, aspect expand）；3D 玩法不變，美術貼在 quad／Sprite3D 上。
 - 跑者呼吸、換道側移在程式；答錯白閃是 shader，不震螢幕。
-- Web 快取破壞：`export-web.bat` 會呼叫 `tools/cachebust.py` 在 index.html 加 `?v=時間戳`；`serve_web.py` 送 no-store / Clear-Site-Data 標頭。
+- Web 快取破壞：`export-web.bat` 會呼叫 `tools/cachebust.py` 把 js/wasm/pck 改名為 `kr2_時間戳.*` 並改寫 index.html；`serve_web.py` 送 no-store / Clear-Site-Data 標頭。
 
 ## 結構
 ```

@@ -8,5 +8,5 @@ if not exist build\web mkdir build\web
 "%GODOT%" --headless --path "%CD%" --export-release "Web" build/web/index.html
 if errorlevel 1 exit /b %ERRORLEVEL%
 python tools\cachebust.py
-for %%F in (build\web\index.pck) do echo pck size: %%~zF bytes
+for %%F in (build\web\kr2_*.pck) do echo pck size: %%~zF bytes
 exit /b %ERRORLEVEL%
