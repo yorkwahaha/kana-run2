@@ -19,7 +19,15 @@ Godot **4.7.2**（`I:\Projects\Godot_v4.7.2`），**Mobile** 渲染器（Web 匯
 | 煞車 | 雙擊並按住 | S / ↓ |
 | 換線 | 按住時左右滑 | A / D / ← / →（設定可改成需按住） |
 | 重播語音 | — | R |
+| 回選關 | 結算畫面按鈕 | Esc / B |
 | 開發者計時 | — | F3（或啟動參數 `-- --dev`、設定 `dev.timing_mode`） |
+
+## 關卡與存檔
+- 開啟後先到「選關」。關卡資料全部在 `config/game_config.json` 的 `levels` 陣列（id、name、kana、romaji、target_correct、時限、星數門檻、罰秒；可選 `romaji_first_n` / `voice_only_after_progress` 覆寫提示規則）。**新增關卡只要加一筆資料**，語音用 romaji 對應 `audio/kana/<romaji>.mp3`（102 個音檔已全部在 `asset_manifest.gd` preload，Web 也會打包）。
+- 第一關 あ行：20 題，63／47／36 秒。第二關 あ行＋か行：30 題，90／66／48 秒（暫定，待實測校準）。
+- 存檔 `user://save.json`：每關 cleared、最佳星數、最佳時間（只在更好時更新）。過前一關才解鎖下一關。
+- 結算畫面：「重玩」「下一關」（最後一關隱藏、未解鎖時停用）「回選關」。鍵盤：Space/Enter 重玩、N 下一關、Esc/B 回選關、選關畫面按 1–9。
+- 想重置進度：刪除 `%APPDATA%\Godot\app_userdata\Kana Run 2.0\save.json`。
 
 ## 規則（第一關）
 - 三條跑道，石碑每 `row_spacing_m` 公尺一排三塊。聽語音（あいうえお），撞對應假名。
@@ -48,7 +56,9 @@ scripts/speed_controller.gd  速度邏輯（純邏輯，可單元測試）
 scripts/rules.gd          星數、碰撞車道、出題
 scripts/dev_logger.gd     計時紀錄
 scripts/asset_manifest.gd 所有執行期資源都要在這裡 preload，否則 Web 匯出會漏檔
-tools/smoke_test.gd       無頭測試
+tools/smoke_test.gd       無頭測試（含多種解析度的版面置中檢查）
+tools/screenshot.gd       需視窗：各解析度截圖（-- --out=資料夾）
+scripts/save_data.gd      存檔／解鎖
 audio/ assets/fonts/      從 1.0 複製的語音、音效、音樂、字型
 ```
 

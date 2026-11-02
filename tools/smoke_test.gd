@@ -6,6 +6,8 @@ extends SceneTree
 const SpeedController = preload("res://scripts/speed_controller.gd")
 const Rules = preload("res://scripts/rules.gd")
 const Assets = preload("res://scripts/asset_manifest.gd")
+const SaveData = preload("res://scripts/save_data.gd")
+const GameConfig = preload("res://scripts/game_config.gd")
 
 var game
 var frames := 0
@@ -96,8 +98,6 @@ func regression_tests() -> void:
 	c2.release(); c2.press()
 	check(not c2.is_braking(), "release without prior press is not a first tap")
 	feature_tests(g)
-	root.remove_child(g)
-	g.free()
 
 func _answer(g, mode: String) -> void:
 	var r = g.active_row()
@@ -172,36 +172,199 @@ func feature_tests(g) -> void:
 	check(g.correct >= 20 and steps < 500, "mixed correct/wrong/miss still reaches 20 correct (%d rows)" % steps)
 
 var reg_game
+var auto_level := 0
+var phase := "unit"
+var layout_i := 0
+var layout_wait := 0
+const SIZES := [Vector2i(1280, 720), Vector2i(1920, 1080), Vector2i(390, 844), Vector2i(844, 390), Vector2i(720, 1280), Vector2i(2560, 600)]
 
 func _initialize() -> void:
 	unit_tests()
 	# nodes only get _ready() once the main loop runs, so the scene-based
 	# tests start from _process (frame 1).
+	DirAccess.remove_absolute("user://selftest_save.json")
 	reg_game = load("res://scenes/main.tscn").instantiate()
 	reg_game.rng_seed = 3
+	reg_game.save_path = "user://selftest_save.json"
 	root.add_child(reg_game)
 
 func _start_autopilot() -> void:
 	print("autopilot run")
 	game = load("res://scenes/main.tscn").instantiate()
 	game.autopilot = true
+	game.save_path = "user://selftest_save_auto.json"
+	game.skip_select = true
+	game.level_index = auto_level
 	game.force_dev_mode = true
 	game.rng_seed = 7
 	root.add_child(game)
 
+func level_tests(g) -> void:
+	print("level data")
+	var lv: Array = GameConfig.levels(GameConfig.load_config())
+	check(lv.size() >= 2 and lv[0].id == "level_01" and lv[1].id == "level_02", "levels loaded in order from config (%d)" % lv.size())
+	check(int(lv[0].target_correct) == 20 and float(lv[0].time_limit_s) == 63.0 and float(lv[0].star2_s) == 47.0 and float(lv[0].star3_s) == 36.0, "level 1: 20 / 63 / 47 / 36 unchanged")
+	check(int(lv[1].target_correct) == 30 and float(lv[1].time_limit_s) == 90.0 and float(lv[1].star2_s) == 66.0 and float(lv[1].star3_s) == 48.0, "level 2: 30 / 90 / 66 / 48")
+	check("".join(lv[1].kana) == "あいうえおかきくけこ", "level 2 pool = あ行 + か行")
+	var voices_ok := true
+	for L in lv:
+		if L.kana.size() != L.romaji.size(): voices_ok = false
+		for r in L.romaji:
+			if not Assets.VOICE.has(r) or Assets.VOICE[r] == null: voices_ok = false
+	check(voices_ok, "every level kana has a preloaded voice clip")
+	print("level 2 rules")
+	g.set_level(1); g.reset_run(); g.start_run()
+	check(g.level_id == "level_02" and g.hint_first_n == 3 and is_equal_approx(g.hint_ratio, 0.5), "level 2 uses hint rules (3 / 0.5)")
+	var seen := {}
+	var ok := true
+	var pool_ok := true
+	var ka_seen := false
+	while g.correct < 15:
+		var r = g.active_row()
+		var k: String = r.kana[r.target]
+		for x in r.kana:
+			if not lv[1].kana.has(x): pool_ok = false
+		if "かきくけこ".contains(k): ka_seen = true
+		var n: int = seen.get(k, 0)
+		if r.hint != (n < 3): ok = false
+		seen[k] = n + 1
+		_answer(g, "correct")
+	check(pool_ok and ka_seen, "level 2 rows use only its 10 kana, か行 appears")
+	check(ok, "level 2 hint shown for first 3 per kana")
+	check(not g.active_row().hint and g.voice_only_announced, "level 2 voice-only after 15/30")
+	while g.correct < 30:
+		_answer(g, "correct")
+	g._tick(0.0)
+	check(g.state == g.State.CLEARED, "level 2 clears at 30 correct")
+
+func save_tests() -> void:
+	print("save / unlock")
+	var lv: Array = GameConfig.levels(GameConfig.load_config())
+	var sd = SaveData.new(); sd.path = "user://selftest_save2.json"; sd.clear_all()
+	check(sd.is_unlocked(lv, 0) and not sd.is_unlocked(lv, 1), "fresh save: only level 1 open")
+	check(sd.record("level_01", 2, 40.0), "first clear is recorded")
+	check(sd.is_unlocked(lv, 1), "clearing level 1 unlocks level 2")
+	check(not sd.record("level_01", 1, 45.0), "worse run does not count as better")
+	var r: Dictionary = sd.get_record("level_01")
+	check(int(r.best_stars) == 2 and is_equal_approx(float(r.best_time), 40.0), "best kept after worse run")
+	check(sd.record("level_01", 3, 31.3), "better run recorded")
+	check(not sd.record("level_01", 2, 35.0), "slower 2-star does not overwrite")
+	check(sd.save_file(), "save written")
+	var sd2 = SaveData.new(); sd2.path = sd.path; sd2.load_file()
+	r = sd2.get_record("level_01")
+	check(int(r.best_stars) == 3 and is_equal_approx(float(r.best_time), 31.3) and sd2.is_unlocked(lv, 1), "save reloads: 3 stars, 31.3 s, level 2 open")
+
+func results_tests(g) -> void:
+	print("results / level select")
+	g.save.clear_all()
+	g.show_select()
+	check(g.state == g.State.SELECT and g.select_box.visible, "level select shown")
+	check(g.level_buttons.size() >= 2 and not g.level_buttons[0].disabled and g.level_buttons[1].disabled, "level 2 locked before clearing level 1")
+	g.choose_level(1)
+	check(g.state == g.State.SELECT, "locked level cannot be started")
+	g.choose_level(0)
+	check(g.state == g.State.READY and g.level_index == 0, "choosing level 1 goes to ready")
+	g.start_run()
+	while g.correct < 20:
+		_answer(g, "correct")
+	g._tick(0.0)
+	check(g.state == g.State.CLEARED and g.results_box.visible, "results panel shown on clear")
+	check(g.btn_next.visible and not g.btn_next.disabled and g.btn_select.visible, "「下一關」enabled after clearing level 1")
+	check(g.save.get_record("level_01").cleared, "clear saved")
+	g.btn_next.pressed.emit()
+	check(g.level_index == 1 and g.state == g.State.READY, "「下一關」goes to level 2")
+	g.start_run()
+	g.elapsed = 999.0
+	g._tick(0.0)
+	check(g.state == g.State.FAILED and g.results_box.visible and g.btn_next.visible == false, "last level: no 「下一關」")
+	g.btn_select.pressed.emit()
+	check(g.state == g.State.SELECT and not g.level_buttons[1].disabled, "「回選關」returns; level 2 now open")
+	g.set_level(0)
+
+func layout_check(g, sz: Vector2i) -> void:
+	var vr: Rect2 = g.get_viewport().get_visible_rect()
+	var cx := vr.size.x * 0.5
+	var tag := "%dx%d" % [sz.x, sz.y]
+	var centered := true
+	var inside := true
+	var bad := []
+	for item in [["hint", g.lbl_hint], ["notice", g.lbl_notice], ["float", g.lbl_float], ["center", g.lbl_center],
+			["results", g.results_box.get_child(0)], ["select", g.select_box.get_child(0)]]:
+		var rc: Rect2 = item[1].get_global_rect()
+		if absf(rc.get_center().x - cx) > 2.0:
+			centered = false; bad.append(item[0])
+	for item in [g.lbl_time, g.lbl_count, g.lbl_speed, g.lbl_combo, g.lbl_hint, g.results_box.get_child(0), g.select_box.get_child(0)]:
+		var rc: Rect2 = item.get_global_rect()
+		if rc.position.x < -1 or rc.position.y < -1 or rc.end.x > vr.size.x + 1 or rc.end.y > vr.size.y + 1:
+			inside = false; bad.append(str(item.name) + " " + str(item.get_global_rect()))
+	check(centered, "%s: centered text/panels are centered (canvas %.0fx%.0f) %s" % [tag, vr.size.x, vr.size.y, str(bad)])
+	check(inside, "%s: all HUD/panels inside the screen %s" % [tag, str(bad)])
+	check(g.lbl_center.get_global_rect().size.x >= vr.size.x - 60, "%s: info text spans the full width" % tag)
+
+func _layout_prepare(g) -> void:
+	g.set_level(0); g.reset_run()
+	g.lbl_hint.text = "ka"; g._notice("聽音模式"); g.lbl_float.text = "○"; g.lbl_combo.text = "20 連擊"
+	g.lbl_result.text = "CLEAR!\n★★★\n\nTime 31.30 s\n(run 31.30 + penalty 0.0)\nwrong 0   miss 0\nbest combo 20\n新紀錄！"
+	g.results_box.visible = true
+	g.show_select()
+	g.results_box.visible = true
+
+var total_frames := 0
+
 func _process(_delta: float) -> bool:
 	frames += 1
-	if frames == 1:
+	total_frames += 1
+	if total_frames > 60 * 400 or (reg_game != null and not reg_game.has_method("reset_run")):
+		printerr("ABORT: game script failed to load or test ran too long")
+		quit(2)
+		return true
+	if phase == "unit":
 		regression_tests()
+		level_tests(reg_game)
+		save_tests()
+		results_tests(reg_game)
+		print("layout")
+		_layout_prepare(reg_game)
+		phase = "layout"
+		layout_wait = 0
+		root.size = SIZES[0]
+		return false
+	if phase == "layout":
+		layout_wait += 1
+		if layout_wait < 3:
+			return false
+		layout_check(reg_game, SIZES[layout_i])
+		layout_i += 1
+		layout_wait = 0
+		if layout_i < SIZES.size():
+			root.size = SIZES[layout_i]
+			return false
+		root.size = Vector2i(720, 1280)
+		root.remove_child(reg_game)
+		reg_game.free()
+		reg_game = null
+		phase = "auto"
+		auto_level = 0
 		_start_autopilot()
+		frames = 0
 		return false
 	if frames == 3:
 		game.start_run()
-	if game.state == game.State.CLEARED or game.state == game.State.FAILED or frames > 60 * 90:
-		check(game.state == game.State.CLEARED, "autopilot clears level 1 (clock %.2f s, correct %d, wrong %d, miss %d)" % [game.clock(), game.correct, game.wrong, game.missed])
-		check(game.wrong == 0 and game.missed == 0, "autopilot makes no mistakes")
-		check(game.logger.entries.size() == 20, "dev logger recorded 20 questions")
+	if frames < 3:
+		return false
+	if game.state == game.State.CLEARED or game.state == game.State.FAILED or frames > 60 * 120:
+		var n := auto_level + 1
+		var tgt := 20 if auto_level == 0 else 30
+		check(game.state == game.State.CLEARED, "autopilot clears level %d (clock %.2f s, stars %d, correct %d, wrong %d, miss %d)" % [n, game.clock(), Rules.stars_for(game.clock(), game.lvl), game.correct, game.wrong, game.missed])
+		check(game.wrong == 0 and game.missed == 0, "autopilot L%d makes no mistakes" % n)
+		check(game.logger.entries.size() == tgt, "dev logger recorded %d questions" % tgt)
 		check(FileAccess.file_exists("user://timing/runs.csv"), "timing CSV written")
+		if auto_level == 0:
+			root.remove_child(game); game.free()
+			auto_level = 1
+			_start_autopilot()
+			frames = 0
+			return false
 		print("RESULT: %s (%d failures)" % ["OK" if fails == 0 else "FAILED", fails])
 		root.remove_child(game)
 		game.free()

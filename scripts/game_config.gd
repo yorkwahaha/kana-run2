@@ -29,3 +29,22 @@ static func _merge(a: Dictionary, b: Dictionary) -> void:
 			_merge(a[k], b[k])
 		else:
 			a[k] = b[k]
+
+## Ordered level list. Accepts an array of {id,...} or a legacy {id: {...}} dict.
+static func levels(cfg: Dictionary) -> Array:
+	var L = cfg.get("levels", [])
+	var out: Array = []
+	if L is Array:
+		for i in L.size():
+			var d: Dictionary = L[i]
+			if not d.has("id"):
+				d["id"] = "level_%02d" % (i + 1)
+			out.append(d)
+	elif L is Dictionary:
+		var keys: Array = L.keys()
+		keys.sort()
+		for k in keys:
+			var d: Dictionary = L[k]
+			d["id"] = k
+			out.append(d)
+	return out

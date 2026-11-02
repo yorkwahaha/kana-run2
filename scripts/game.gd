@@ -8,10 +8,18 @@ const SpeedController = preload("res://scripts/speed_controller.gd")
 const Rules = preload("res://scripts/rules.gd")
 const DevLogger = preload("res://scripts/dev_logger.gd")
 const Assets = preload("res://scripts/asset_manifest.gd")
+const SaveData = preload("res://scripts/save_data.gd")
 
-enum State { READY, RUNNING, CLEARED, FAILED }
+enum State { SELECT, READY, RUNNING, CLEARED, FAILED }
 
-@export var level_id := "level_01"
+var level_id := "level_01"
+var level_index := 0
+var levels: Array = []
+var save = SaveData.new()
+## Tests point this at a scratch file.
+var save_path := "user://save.json"
+## Tests set this to skip the level-select screen on start.
+var skip_select := false
 ## Set by tools/smoke_test.gd: steers to the right lane and holds accelerate.
 var autopilot := false
 var force_dev_mode := false
@@ -84,10 +92,20 @@ var lbl_float: Label
 var lbl_hint: Label
 var lbl_combo: Label
 var lbl_notice: Label
+var results_box: Control
+var lbl_result: Label
+var btn_retry: Button
+var btn_next: Button
+var btn_select: Button
+var select_box: Control
+var select_list: VBoxContainer
+var level_buttons: Array = []
 
 func _ready() -> void:
 	cfg = GameConfig.load_config()
-	lvl = cfg.get("levels", {}).get(level_id, {})
+	levels = GameConfig.levels(cfg)
+	save.path = save_path
+	save.load_file()
 	ctrl.configure(cfg.get("speed", {}))
 	var L: Dictionary = cfg.get("lanes", {})
 	lane_count = int(L.get("count", 3))
@@ -101,15 +119,24 @@ func _ready() -> void:
 	row_spacing = float(T.get("row_spacing_m", 24.0))
 	first_row = float(T.get("first_row_m", 30.0))
 	spawn_ahead = float(T.get("spawn_ahead_m", 80.0))
-	var H: Dictionary = cfg.get("hints", {})
-	hint_first_n = int(H.get("romaji_first_n", 3))
-	hint_ratio = float(H.get("voice_only_after_progress", 0.5))
 	dev_mode = force_dev_mode or bool(cfg.get("dev", {}).get("timing_mode", false)) \
 		or OS.get_cmdline_user_args().has("--dev")
 	_build_world()
 	_build_hud()
 	_build_audio()
+	set_level(level_index)
 	reset_run()
+	if not skip_select:
+		show_select()
+
+## Switch level (data from config "levels" array). Per-level hint overrides allowed.
+func set_level(i: int) -> void:
+	level_index = clampi(i, 0, levels.size() - 1)
+	lvl = levels[level_index]
+	level_id = str(lvl.get("id", "level_%02d" % (level_index + 1)))
+	var H: Dictionary = cfg.get("hints", {})
+	hint_first_n = int(lvl.get("romaji_first_n", H.get("romaji_first_n", 3)))
+	hint_ratio = float(lvl.get("voice_only_after_progress", H.get("voice_only_after_progress", 0.5)))
 
 # ---------------------------------------------------------------- build
 func lane_x(i: int) -> float:
@@ -177,43 +204,148 @@ func _build_world() -> void:
 	cam.fov = base_fov
 	add_child(cam)
 
-func _label(size: int, pos: Vector2, align := HORIZONTAL_ALIGNMENT_LEFT) -> Label:
+## All HUD controls are anchored to the viewport (no fixed 720-px design widths),
+## so they stay correct when the window / web canvas is wider or narrower.
+func _label(size: int, align := HORIZONTAL_ALIGNMENT_LEFT, font: Font = null) -> Label:
 	var l := Label.new()
-	l.add_theme_font_override("font", Assets.FONT_UI)
+	l.add_theme_font_override("font", font if font else Assets.FONT_HUD)
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_outline_color", Color.BLACK)
 	l.add_theme_constant_override("outline_size", 6)
-	l.position = pos
 	l.horizontal_alignment = align
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(l)
 	return l
 
+static func _place(c: Control, al: float, at: float, ar: float, ab: float, ol: float, ot: float, o_r: float, ob: float) -> void:
+	c.anchor_left = al; c.anchor_top = at; c.anchor_right = ar; c.anchor_bottom = ab
+	c.offset_left = ol; c.offset_top = ot; c.offset_right = o_r; c.offset_bottom = ob
+
+func _button(text: String) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.add_theme_font_override("font", Assets.FONT_HUD)
+	b.add_theme_font_size_override("font_size", 36)
+	b.custom_minimum_size = Vector2(180, 72)
+	b.focus_mode = Control.FOCUS_NONE
+	return b
+
+func _panel_center() -> Array:
+	var cc := CenterContainer.new()
+	_place(cc, 0, 0, 1, 1, 0, 0, 0, 0)
+	cc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(cc)
+	var pc := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.05, 0.03, 0.12, 0.85)
+	sb.set_corner_radius_all(18)
+	sb.set_content_margin_all(28)
+	pc.add_theme_stylebox_override("panel", sb)
+	cc.add_child(pc)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 18)
+	vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	pc.add_child(vb)
+	return [cc, vb]
+
 func _build_hud() -> void:
 	hud = CanvasLayer.new()
 	add_child(hud)
-	lbl_time = _label(44, Vector2(24, 20))
-	lbl_count = _label(44, Vector2(24, 76))
-	lbl_speed = _label(40, Vector2(24, 1180))
-	lbl_center = _label(40, Vector2(0, 420), HORIZONTAL_ALIGNMENT_CENTER)
-	lbl_center.size = Vector2(720, 400)
-	lbl_center.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	lbl_float = _label(64, Vector2(0, 300), HORIZONTAL_ALIGNMENT_CENTER)
-	lbl_float.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	lbl_hint = _label(96, Vector2(0, 150), HORIZONTAL_ALIGNMENT_CENTER)
-	lbl_hint.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	lbl_hint.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_hint.add_theme_color_override("font_color", Color(1.0, 0.95, 0.6))
-	lbl_combo = _label(56, Vector2(440, 1080))
-	lbl_combo.size = Vector2(260, 80)
-	lbl_combo.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_time = _label(40);  _place(lbl_time, 0, 0, 0.5, 0, 24, 16, 0, 70)
+	lbl_count = _label(40); _place(lbl_count, 0, 0, 0.5, 0, 24, 70, 0, 124)
+	lbl_speed = _label(36); _place(lbl_speed, 0, 1, 0.6, 1, 24, -96, 0, -36)
+	lbl_combo = _label(52, HORIZONTAL_ALIGNMENT_RIGHT); _place(lbl_combo, 0.4, 1, 1, 1, 0, -110, -24, -36)
 	lbl_combo.add_theme_color_override("font_color", Color(1.0, 0.75, 0.3))
-	lbl_notice = _label(72, Vector2(0, 560), HORIZONTAL_ALIGNMENT_CENTER)
-	lbl_notice.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	lbl_notice.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_hint = _label(96, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_hint, 0, 0, 1, 0, 0, 130, 0, 250)
+	lbl_hint.add_theme_color_override("font_color", Color(1.0, 0.95, 0.6))
+	lbl_float = _label(64, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_float, 0, 0, 1, 0, 0, 260, 0, 340)
+	lbl_notice = _label(72, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_notice, 0, 0.42, 1, 0.42, 0, -50, 0, 50)
 	lbl_notice.add_theme_color_override("font_color", Color(0.6, 0.9, 1.0))
-	lbl_dev = _label(22, Vector2(380, 20))
+	lbl_center = _label(34, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_center, 0, 0, 1, 1, 20, 120, -20, -110)
+	lbl_center.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl_dev = _label(22, HORIZONTAL_ALIGNMENT_LEFT, Assets.FONT_UI); _place(lbl_dev, 1, 0, 1, 0, -330, 130, -10, 420)
+	lbl_dev.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 	lbl_dev.add_theme_color_override("font_color", Color(0.6, 1.0, 0.6))
+	# results
+	var r := _panel_center()
+	results_box = r[0]
+	lbl_result = Label.new()
+	lbl_result.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_result.add_theme_font_size_override("font_size", 36)
+	lbl_result.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	r[1].add_child(lbl_result)
+	var hb := HBoxContainer.new()
+	hb.alignment = BoxContainer.ALIGNMENT_CENTER
+	hb.add_theme_constant_override("separation", 14)
+	r[1].add_child(hb)
+	btn_retry = _button("重玩"); btn_next = _button("下一關"); btn_select = _button("回選關")
+	for b in [btn_retry, btn_next, btn_select]:
+		hb.add_child(b)
+	btn_retry.pressed.connect(func(): reset_run())
+	btn_next.pressed.connect(go_next_level)
+	btn_select.pressed.connect(show_select)
+	results_box.visible = false
+	# level select
+	var sp := _panel_center()
+	select_box = sp[0]
+	select_list = sp[1]
+	select_box.visible = false
+
+func show_select() -> void:
+	state = State.SELECT
+	ctrl.reset()
+	if music.playing:
+		music.stop()
+	results_box.visible = false
+	lbl_center.text = ""
+	lbl_hint.text = ""
+	for c in select_list.get_children():
+		c.queue_free()
+	level_buttons.clear()
+	var title := Label.new()
+	title.text = "選關"
+	title.add_theme_font_override("font", Assets.FONT_HUD)
+	title.add_theme_font_size_override("font_size", 48)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	select_list.add_child(title)
+	for i in levels.size():
+		var L: Dictionary = levels[i]
+		var id := str(L.get("id"))
+		var unlocked := save.is_unlocked(levels, i)
+		var rec: Dictionary = save.get_record(id)
+		var txt := "%s" % str(L.get("name", id))
+		if not unlocked:
+			txt += "   鎖定"
+		elif rec.get("best_time", -1.0) >= 0.0:
+			txt += "   %s  %.1fs" % [_stars_text(int(rec.get("best_stars", 0))), float(rec.best_time)]
+		var b := _button(txt)
+		b.custom_minimum_size = Vector2(480, 84)
+		b.disabled = not unlocked
+		b.pressed.connect(choose_level.bind(i))
+		select_list.add_child(b)
+		level_buttons.append(b)
+	select_box.visible = true
+
+func choose_level(i: int) -> void:
+	if not save.is_unlocked(levels, i):
+		return
+	select_box.visible = false
+	set_level(i)
+	reset_run()
+
+func go_next_level() -> void:
+	if can_go_next():
+		choose_level(level_index + 1)
+
+func can_go_next() -> bool:
+	return level_index + 1 < levels.size() and save.is_unlocked(levels, level_index + 1)
+
+static func _stars_text(n: int) -> String:
+	var t := ""
+	for i in 3:
+		t += "★" if i < n else "☆"
+	return t
 
 func _build_audio() -> void:
 	voice = AudioStreamPlayer.new()
@@ -256,7 +388,9 @@ func reset_run() -> void:
 	lbl_hint.text = ""; lbl_notice.text = ""
 	_spawn_rows()
 	state = State.READY
-	lbl_center.text = "%s\n\nHOLD = accelerate\nrelease = slow down\ndouble-tap & hold = brake\nswipe (while holding) = lane\n\nPC: Space/W hold, S brake, A/D lanes\nR = replay voice   F3 = dev timing\n\nTap / Space to start" % str(lvl.get("name", "Level 1"))
+	results_box.visible = false
+	select_box.visible = false
+	lbl_center.text = "%s\n\nHOLD = accelerate\nrelease = slow down\ndouble-tap & hold = brake\nswipe (while holding) = lane\n\nPC: Space/W hold, S brake, A/D lanes\nR = replay voice   F3 = dev timing   Esc = levels\n\nTap / Space to start" % str(lvl.get("name", "Level 1"))
 	lbl_float.text = ""
 	if music.playing:
 		music.stop()
@@ -265,6 +399,8 @@ func reset_run() -> void:
 
 func start_run() -> void:
 	state = State.RUNNING
+	select_box.visible = false
+	results_box.visible = false
 	lbl_center.text = ""
 	logger.start(level_id)
 	if music.stream:
@@ -360,6 +496,7 @@ func _romaji(k: String) -> String:
 func _notice(t: String) -> void:
 	lbl_notice.text = t
 	lbl_notice.modulate.a = 1.0
+	lbl_notice.pivot_offset = lbl_notice.size * 0.5   # scale around the centre, not the left edge
 	lbl_notice.scale = Vector2(1.4, 1.4)
 	var tw := create_tween()
 	tw.tween_property(lbl_notice, "scale", Vector2.ONE, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
@@ -451,18 +588,26 @@ func _finish(cleared: bool) -> void:
 	ctrl.reset()
 	music.stop()
 	var stars := Rules.stars_for(clock(), lvl) if cleared else 0
-	var star_txt := "STARS %d / 3" % stars
+	var new_best := false
 	if cleared:
-		lbl_center.text = "CLEAR!\n%s\n\nTime %.2f s\n(run %.2f + penalty %.1f)\nwrong %d   miss %d\nbest combo %d\n\nTap / Space to retry" % [star_txt, clock(), elapsed, penalty, wrong, missed, best_combo]
+		new_best = save.record(level_id, stars, clock())
+		save.save_file()
+		lbl_result.text = "CLEAR!\n%s\n\nTime %.2f s\n(run %.2f + penalty %.1f)\nwrong %d   miss %d\nbest combo %d%s" % [
+			_stars_text(stars), clock(), elapsed, penalty, wrong, missed, best_combo, "\n新紀錄！" if new_best else ""]
 		sfx("shatter", 0.8, 2.0)
 	else:
-		lbl_center.text = "TIME UP\n%d / %d\n\nTap / Space to retry" % [correct, int(lvl.get("target_correct", 20))]
+		lbl_result.text = "TIME UP\n%d / %d" % [correct, int(lvl.get("target_correct", 20))]
 		sfx("back")
+	lbl_center.text = ""
+	lbl_hint.text = ""
+	btn_next.visible = level_index + 1 < levels.size()
+	btn_next.disabled = not can_go_next()
+	results_box.visible = true
 	if dev_mode:
 		last_saved_path = logger.save("clear" if cleared else "fail", elapsed, clock(), stars)
 		print("[dev] timing saved: ", last_saved_path)
-	print("[result] %s clock=%.3f elapsed=%.3f penalty=%.1f correct=%d wrong=%d miss=%d stars=%d" % [
-		"CLEAR" if cleared else "FAIL", clock(), elapsed, penalty, correct, wrong, missed, stars])
+	print("[result] %s %s clock=%.3f elapsed=%.3f penalty=%.1f correct=%d wrong=%d miss=%d stars=%d" % [
+		level_id, "CLEAR" if cleared else "FAIL", clock(), elapsed, penalty, correct, wrong, missed, stars])
 
 # ---------------------------------------------------------------- feedback
 func _float_text(t: String, c: Color) -> void:
@@ -564,6 +709,11 @@ func _update_view(dt: float) -> void:
 		d.position = Vector3(d.get_meta("x"), 0.01, z)
 
 func _update_hud() -> void:
+	# keep pop-scale pivots centred even if the window was resized mid-animation
+	lbl_notice.pivot_offset = lbl_notice.size * 0.5
+	lbl_combo.pivot_offset = lbl_combo.size * 0.5
+	var in_game := state != State.SELECT
+	lbl_time.visible = in_game; lbl_count.visible = in_game; lbl_speed.visible = in_game
 	var limit := float(lvl.get("time_limit_s", 60.0))
 	lbl_time.text = "TIME %.1f / %d" % [clock(), int(limit)]
 	lbl_count.text = "%d / %d" % [correct, int(lvl.get("target_correct", 20))]
@@ -584,9 +734,7 @@ func _primary_down() -> void:
 	if state == State.READY:
 		start_run()
 	elif state != State.RUNNING:
-		if result_time > 0.6:
-			reset_run()
-		return
+		return   # select / results screens use their buttons (keyboard shortcuts below)
 	ctrl.press()
 
 func _primary_up() -> void:
@@ -600,6 +748,8 @@ func change_lane(dir: int) -> void:
 
 func _unhandled_input(ev: InputEvent) -> void:
 	if ev is InputEventScreenTouch:
+		if state == State.SELECT or state == State.CLEARED or state == State.FAILED:
+			return
 		if ev.pressed and touch_id == -1:
 			touch_id = ev.index
 			touch_anchor = ev.position
@@ -615,9 +765,19 @@ func _unhandled_input(ev: InputEvent) -> void:
 				touch_anchor = ev.position
 	elif ev is InputEventKey and not ev.echo:
 		match ev.keycode:
-			KEY_SPACE, KEY_W, KEY_UP:
-				if ev.pressed: _primary_down()
+			KEY_SPACE, KEY_W, KEY_UP, KEY_ENTER:
+				if ev.pressed and (state == State.CLEARED or state == State.FAILED):
+					if result_time > 0.4: reset_run()
+				elif ev.pressed and state == State.SELECT:
+					pass
+				elif ev.pressed: _primary_down()
 				else: _primary_up()
+			KEY_N:
+				if ev.pressed and (state == State.CLEARED or state == State.FAILED): go_next_level()
+			KEY_ESCAPE, KEY_B:
+				if ev.pressed and state != State.RUNNING: show_select()
+			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9:
+				if ev.pressed and state == State.SELECT: choose_level(ev.keycode - KEY_1)
 			KEY_S, KEY_DOWN:
 				ctrl.key_brake = ev.pressed
 			KEY_A, KEY_LEFT:
