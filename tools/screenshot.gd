@@ -18,7 +18,7 @@ func _initialize() -> void:
 	g.save_path = "user://screenshot_save.json"
 	root.add_child(g)
 	for sz in SIZES:
-		for scr in ["select", "settings", "run", "run_step", "pause", "results"]:
+		for scr in ["select", "select_kata", "settings", "run", "run_step", "hp_damage", "boss_shield", "pause", "results"]:
 			steps.append([sz, scr])
 
 func _process(_d: float) -> bool:
@@ -30,7 +30,14 @@ func _process(_d: float) -> bool:
 		DisplayServer.window_set_size(st[0])
 		root.size = st[0]
 		match st[1]:
-			"select": g.show_select()
+			"select": g.set_distance("mid", false); g.show_select()
+			"select_kata": g.select_tab = "kata"; g.show_select(); g.select_tab = "hira"
+			"hp_damage":
+				g.set_level(0); g.reset_run(); g.start_run(); g.take_damage(35); g.hp_delay_wait = 99.0
+			"boss_shield":
+				g.set_level(3); g.reset_run(); g.start_run()
+				while not g.boss_shield_up:
+					var r = g.active_row(); g.player_dist = r.dist; g.player_x = g.lane_x(r.target); g._resolve(r); g._spawn_rows()
 			"ready": g.set_level(0); g.reset_run()
 			"run":
 				g.set_speed_mode("race", false); g.reset_run(); g.start_run(); g.ctrl.speed = 11.0; g.ctrl.toggle_lock()
@@ -42,7 +49,7 @@ func _process(_d: float) -> bool:
 			"pause":
 				g.reset_run(); g.start_run(); g.pause_game()
 			"results":
-				g.reset_run(); g.start_run(); g.correct = 20; g._tick(0.0)
+				g.reset_run(); g.start_run(); g.set_level(3); g.reset_run(); g.start_run(); g.correct = int(g.lvl.target_correct); g._tick(0.0)
 	wait += 1
 	if wait >= 8:
 		var img := root.get_texture().get_image()

@@ -9,6 +9,7 @@ const Rules = preload("res://scripts/rules.gd")
 const DevLogger = preload("res://scripts/dev_logger.gd")
 const Assets = preload("res://scripts/asset_manifest.gd")
 const SaveData = preload("res://scripts/save_data.gd")
+const LevelDB = preload("res://scripts/level_db.gd")
 
 ## HP hooks for later upgrades: (hp, max_hp, shield)
 signal hp_changed(hp: int, max_hp: int, shield: int)
@@ -87,16 +88,47 @@ var btn_mode_race: Button
 var btn_mode_step: Button
 var btn_settings_back: Button
 # HP
-var hp := 3
-var max_hp := 3
-var base_max_hp := 3
-var max_hp_bonus := 0     # hook: upgrades add to this via set_max_hp_bonus()
-var shield := 0           # hook: a charm that blocks the next damage
-var miss_costs_heart := false
-var wrong_damage := 1
+var hp := 100
+var max_hp := 100
+var base_max_hp := 100
+var max_hp_bonus := 0         # hook: upgrades add max HP via set_max_hp_bonus(value)
+var damage_reduction := 0.0   # hook: percent (0..90) taken off every hit
+var shield := 0               # hook: a charm; each point blocks one whole hit
+var wrong_damage := 35
+var miss_damage := 0
+var hp_delayed := 100.0       # the red "chunk" that drains after a short wait
+var hp_delay_wait := 0.0
+var bar_wait_s := 0.45
+var bar_drain := 60.0
 var fail_reason := ""     # "", "time_up", "hp_out"
-var hearts_box: HBoxContainer
+var hearts_box: Control       # HP widget (heart icon + bar + number), top-left
+var hp_fill: ColorRect
+var hp_chunk: ColorRect
+var hp_bg: ColorRect
+var lbl_hp: Label
 var lbl_shield: Label
+# distance / points / review / boss shield
+var distance := "short"
+var force_distance := ""
+var review_ratio := 0.2
+var lookalikes := {}
+var same_sound: Array = []
+var shield_thresholds: Array = []
+var shield_phase := 0         # how many thresholds have been triggered
+var boss_shield_up := false
+var break_chain := 2
+var break_progress := 0
+var shields_broken := 0
+var last_points := 0
+var last_record := {}
+var review_asked := 0
+var select_tab := "hira"
+var select_scroll: ScrollContainer
+var btn_distance: Button
+var btn_tab_hira: Button
+var btn_tab_kata: Button
+var lbl_points: Label
+var lbl_boss: Label
 var _js_visibility_cb   # keeps the JavaScriptBridge callback alive (web)
 
 # nodes
@@ -139,6 +171,9 @@ var btn_quit: Button
 func _ready() -> void:
 	cfg = GameConfig.load_config()
 	levels = GameConfig.levels(cfg)
+	var HPc: Dictionary = cfg.get("hp", {})
+	bar_wait_s = float(HPc.get("delayed_bar_wait_s", 0.45))
+	bar_drain = float(HPc.get("delayed_bar_drain_per_s", 60.0))
 	save.path = save_path
 	save.load_file()
 	ctrl.configure(cfg.get("speed", {}))
@@ -161,23 +196,60 @@ func _ready() -> void:
 	_setup_web_visibility()
 	var m: String = force_mode if force_mode != "" else str(save.get_setting("speed_mode", cfg.get("speed", {}).get("default_mode", "race")))
 	set_speed_mode(m, false)
+	lookalikes = cfg.get("kata_lookalikes", {})
+	same_sound = cfg.get("same_sound", [])
+	review_ratio = float(cfg.get("review", {}).get("ratio", 0.2))
+	set_distance(force_distance if force_distance != "" else str(save.get_setting("distance", cfg.get("distances", {}).get("default", "short"))), false)
 	set_level(level_index)
 	reset_run()
 	if not skip_select:
 		show_select()
 
-## Switch level (data from config "levels" array). Per-level hint overrides allowed.
+## Switch level. Effective data (kana pool, required count, limits) comes from LevelDB for the current distance.
 func set_level(i: int) -> void:
 	level_index = clampi(i, 0, levels.size() - 1)
-	lvl = levels[level_index]
+	lvl = LevelDB.effective(cfg, levels, level_index, distance)
 	level_id = str(lvl.get("id", "level_%02d" % (level_index + 1)))
 	var H: Dictionary = cfg.get("hints", {})
 	hint_first_n = int(lvl.get("romaji_first_n", H.get("romaji_first_n", 3)))
 	hint_ratio = float(lvl.get("voice_only_after_progress", H.get("voice_only_after_progress", 0.5)))
 	var HP: Dictionary = cfg.get("hp", {})
-	base_max_hp = maxi(1, int(lvl.get("max_hp", HP.get("max_hp", 3))))
-	miss_costs_heart = bool(lvl.get("miss_costs_heart", HP.get("miss_costs_heart", false)))
-	wrong_damage = int(lvl.get("wrong_damage", HP.get("wrong_damage", 1)))
+	base_max_hp = maxi(1, int(lvl.get("max_hp", HP.get("max_hp", 100))))
+	wrong_damage = int(lvl.get("wrong_damage", HP.get("wrong_damage", 35)))
+	miss_damage = int(lvl.get("miss_damage", HP.get("miss_damage", 0)))
+	damage_reduction = float(HP.get("damage_reduction_pct", 0.0)) if damage_reduction == 0.0 else damage_reduction
+	var BS: Dictionary = cfg.get("boss_shield", {})
+	shield_thresholds = []
+	var typ := str(lvl.get("type", "normal"))
+	if bool(BS.get("enabled", true)) and typ != "normal":
+		shield_thresholds = lvl.get("shield_thresholds", BS.get("thresholds", [0.3, 0.6]))
+		break_chain = int(BS.get("break_chain", {}).get(typ, 2))
+
+func distance_name(d := "") -> String:
+	return str(cfg.get("distances", {}).get("names", {}).get(d if d != "" else distance, d))
+
+func distance_multiplier(d := "") -> float:
+	return float(cfg.get("distances", {}).get("points_multiplier", {}).get(d if d != "" else distance, 1.0))
+
+## 短程 / 中程 / 長程. Saved as the last choice; re-derives the current level's count and limits.
+func set_distance(d: String, persist := true) -> void:
+	var order: Array = cfg.get("distances", {}).get("order", ["short", "mid", "long"])
+	if not order.has(d):
+		d = order[0]
+	distance = d
+	if persist:
+		save.set_setting("distance", d)
+		save.save_file()
+	if levels.size() > 0 and lvl.size() > 0:
+		set_level(level_index)
+	if btn_distance != null:
+		btn_distance.text = "距離：%s（點擊切換）" % distance_name()
+
+func cycle_distance() -> void:
+	var order: Array = cfg.get("distances", {}).get("order", ["short", "mid", "long"])
+	set_distance(order[(order.find(distance) + 1) % order.size()])
+	if state == State.SELECT:
+		show_select()
 
 # ---------------------------------------------------------------- build
 func lane_x(i: int) -> float:
@@ -295,14 +367,47 @@ func _build_hud() -> void:
 	add_child(hud)
 	lbl_time = _label(40);  _place(lbl_time, 0, 0, 0.5, 0, 24, 10, 0, 66)
 	lbl_count = _label(40); _place(lbl_count, 0, 0, 0.5, 0, 24, 70, 0, 124)
-	hearts_box = HBoxContainer.new()
+	hearts_box = Control.new()
 	hearts_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hearts_box.add_theme_constant_override("separation", 6)
 	hud.add_child(hearts_box)
-	_place(hearts_box, 0, 0, 0, 0, 24, 136, 380, 196)
-	lbl_shield = _label(34)
+	_place(hearts_box, 0, 0, 0, 0, 24, 136, 344, 190)
+	var heart := Label.new()
+	heart.text = "♥"
+	heart.add_theme_font_override("font", Assets.FONT_HUD)
+	heart.add_theme_font_size_override("font_size", 40)
+	heart.add_theme_color_override("font_color", Color(1.0, 0.35, 0.45))
+	heart.add_theme_color_override("font_outline_color", Color.BLACK)
+	heart.add_theme_constant_override("outline_size", 6)
+	heart.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	heart.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hearts_box.add_child(heart); _place(heart, 0, 0, 0, 1, 0, 0, 44, 0)
+	hp_bg = ColorRect.new(); hp_bg.color = Color(0.1, 0.08, 0.12, 0.85)
+	hp_chunk = ColorRect.new(); hp_chunk.color = Color(1.0, 0.3, 0.25)
+	hp_fill = ColorRect.new(); hp_fill.color = Color(0.35, 0.9, 0.45)
+	for cr in [hp_bg, hp_chunk, hp_fill]:
+		cr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hearts_box.add_child(cr)
+	_place(hp_bg, 0, 0.2, 1, 0.8, 50, 0, -50, 0)
+	_place(hp_chunk, 0, 0.2, 0, 0.8, 50, 0, 50, 0)
+	_place(hp_fill, 0, 0.2, 0, 0.8, 50, 0, 50, 0)
+	lbl_hp = Label.new()
+	lbl_hp.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_hp.add_theme_font_size_override("font_size", 24)
+	lbl_hp.add_theme_color_override("font_outline_color", Color.BLACK)
+	lbl_hp.add_theme_constant_override("outline_size", 5)
+	lbl_hp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_hp.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl_hp.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hearts_box.add_child(lbl_hp); _place(lbl_hp, 0, 0, 1, 1, 50, 0, -50, 0)
+	lbl_shield = Label.new()
+	lbl_shield.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_shield.add_theme_font_size_override("font_size", 24)
 	lbl_shield.add_theme_color_override("font_color", Color(0.6, 0.85, 1.0))
-	lbl_shield.reparent(hearts_box)
+	lbl_shield.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl_shield.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hearts_box.add_child(lbl_shield); _place(lbl_shield, 1, 0, 1, 1, -46, 0, 0, 0)
+	lbl_boss = _label(32, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_boss, 0, 0, 1, 0, 0, 250, 0, 300)
+	lbl_boss.add_theme_color_override("font_color", Color(0.55, 0.85, 1.0))
 	lbl_speed = _label(28, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_speed, 0.5, 1, 0.5, 1, -115, -90, 115, -36)
 	lbl_combo = _label(52, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_combo, 0.5, 1, 0.5, 1, -115, -170, 115, -100)
 	lbl_combo.add_theme_color_override("font_color", Color(1.0, 0.75, 0.3))
@@ -368,8 +473,9 @@ func _build_hud() -> void:
 	results_box = r[0]
 	lbl_result = Label.new()
 	lbl_result.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_result.add_theme_font_size_override("font_size", 36)
+	lbl_result.add_theme_font_size_override("font_size", 28)
 	lbl_result.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_result.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	r[1].add_child(lbl_result)
 	var hb := HBoxContainer.new()
 	hb.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -415,7 +521,7 @@ func _set_btn_lit(p: Panel, lit: bool) -> void:
 	p.modulate = Color(1.6, 1.6, 1.6) if lit else Color.WHITE
 
 # ---------------------------------------------------------------- HP
-## Upgrade hook: extra max hearts (e.g. from an upgrade). refill = also fill to the new max.
+## Upgrade hook: extra max HP (value). refill = also fill to the new max.
 func set_max_hp_bonus(bonus: int, refill := true) -> void:
 	max_hp_bonus = maxi(0, bonus)
 	set_max_hp(base_max_hp + max_hp_bonus, refill)
@@ -423,20 +529,32 @@ func set_max_hp_bonus(bonus: int, refill := true) -> void:
 func set_max_hp(n: int, refill := false) -> void:
 	max_hp = maxi(1, n)
 	hp = max_hp if refill else mini(hp, max_hp)
+	hp_delayed = minf(hp_delayed, float(max_hp)) if not refill else float(hp)
 	_emit_hp()
 
-## Charm hook: each shield point blocks one future damage.
+## Upgrade hook: percent of every hit that is ignored (clamped 0..90).
+func set_damage_reduction(pct: float) -> void:
+	damage_reduction = clampf(pct, 0.0, 90.0)
+
+## Charm hook: each shield point blocks one whole future hit.
 func add_shield(n := 1) -> void:
 	shield = maxi(0, shield + n)
 	_emit_hp()
 
-## Heal hook (+1 heart etc.), capped at max_hp.
-func heal(n := 1) -> void:
+## Heal hook (value), capped at max_hp.
+func heal(n := 10) -> void:
 	hp = mini(max_hp, hp + maxi(0, n))
+	hp_delayed = maxf(hp_delayed, float(hp))
 	_emit_hp()
 
-## Applies damage. Returns true if a heart was actually lost. Ends the run at 0.
-func take_damage(n := 1) -> bool:
+## Damage after reduction (rounded, at least 1 if raw > 0).
+func damage_after_reduction(n: int) -> int:
+	if n <= 0:
+		return 0
+	return maxi(1, int(round(n * (1.0 - damage_reduction / 100.0))))
+
+## Applies damage. Returns true if HP was actually lost. Ends the run at 0.
+func take_damage(n := 35) -> bool:
 	if n <= 0:
 		return false
 	if shield > 0:
@@ -445,8 +563,10 @@ func take_damage(n := 1) -> bool:
 		_emit_hp()
 		_hearts_fx(Color(0.6, 0.85, 1.0))
 		return false
-	hp = maxi(0, hp - n)
-	damaged.emit(n, false)
+	var d := damage_after_reduction(n)
+	hp = maxi(0, hp - d)
+	hp_delay_wait = bar_wait_s
+	damaged.emit(d, false)
 	_emit_hp()
 	_hearts_fx(Color(1.0, 0.25, 0.25))
 	if hp <= 0 and state == State.RUNNING:
@@ -454,41 +574,32 @@ func take_damage(n := 1) -> bool:
 	return true
 
 func _emit_hp() -> void:
-	_rebuild_hearts()
+	_refresh_hp_bar()
 	hp_changed.emit(hp, max_hp, shield)
 
-func _rebuild_hearts() -> void:
+func _refresh_hp_bar() -> void:
 	if hearts_box == null:
 		return
-	for c in hearts_box.get_children():
-		if c != lbl_shield:
-			hearts_box.remove_child(c)
-			c.queue_free()
-	for i in max_hp:
-		var l := Label.new()
-		l.text = "♥" if i < hp else "♡"
-		l.add_theme_font_override("font", Assets.FONT_HUD)
-		l.add_theme_font_size_override("font_size", 44)
-		l.add_theme_color_override("font_color", Color(1.0, 0.35, 0.45) if i < hp else Color(0.6, 0.55, 0.65))
-		l.add_theme_color_override("font_outline_color", Color.BLACK)
-		l.add_theme_constant_override("outline_size", 6)
-		l.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		hearts_box.add_child(l)
-	hearts_box.move_child(lbl_shield, -1)
-	lbl_shield.text = ("盾×%d" % shield) if shield > 0 else ""
+	var w := maxf(0.0, hearts_box.size.x - 100.0)
+	if w <= 0.0:
+		w = 220.0
+	hp_fill.offset_right = 50.0 + w * float(hp) / float(max_hp)
+	hp_chunk.offset_right = 50.0 + w * clampf(hp_delayed, 0.0, float(max_hp)) / float(max_hp)
+	lbl_hp.text = "%d / %d" % [hp, max_hp]
+	var ratio := float(hp) / float(max_hp)
+	hp_fill.color = Color(0.35, 0.9, 0.45) if ratio > 0.5 else (Color(1.0, 0.8, 0.3) if ratio > 0.25 else Color(1.0, 0.35, 0.3))
+	lbl_shield.text = ("盾%d" % shield) if shield > 0 else ""
 
-## Flash + shake of the heart icons only (never the camera / screen).
+## Flash + shake of the HP widget only (never the camera / screen).
 func _hearts_fx(col: Color) -> void:
 	if hearts_box == null:
 		return
 	hearts_box.modulate = col * 1.6
 	var tw := create_tween()
 	tw.tween_property(hearts_box, "modulate", Color.WHITE, 0.4)
-	var x0 := 24.0
 	var sh := create_tween()
 	for d in [10.0, -8.0, 6.0, -4.0, 0.0]:
-		sh.tween_property(hearts_box, "offset_left", x0 + d, 0.04)
-	sh.parallel().tween_property(hearts_box, "offset_right", 380.0, 0.01)
+		sh.tween_property(hearts_box, "position:x", 24.0 + d, 0.04)
 
 # ---------------------------------------------------------------- pause
 func pause_game() -> void:
@@ -603,36 +714,98 @@ func show_select() -> void:
 	lbl_center.text = ""
 	lbl_hint.text = ""
 	for c in select_list.get_children():
+		select_list.remove_child(c)
 		c.queue_free()
 	level_buttons.clear()
+	var vs: Vector2 = get_viewport().get_visible_rect().size
+	var w := minf(560.0, vs.x - 90.0)
 	var title := Label.new()
 	title.text = "選關"
 	title.add_theme_font_override("font", Assets.FONT_HUD)
-	title.add_theme_font_size_override("font_size", 48)
+	title.add_theme_font_size_override("font_size", 44)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	select_list.add_child(title)
+	lbl_points = Label.new()
+	lbl_points.text = "總點數 %d" % save.points()
+	lbl_points.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_points.add_theme_font_size_override("font_size", 28)
+	lbl_points.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	select_list.add_child(lbl_points)
+	var tabs := HBoxContainer.new()
+	tabs.alignment = BoxContainer.ALIGNMENT_CENTER
+	tabs.add_theme_constant_override("separation", 10)
+	select_list.add_child(tabs)
+	btn_tab_hira = _button("平假名"); btn_tab_kata = _button("片假名")
+	for b in [btn_tab_hira, btn_tab_kata]:
+		b.toggle_mode = true
+		b.custom_minimum_size = Vector2(w * 0.5 - 5, 64)
+		b.add_theme_font_size_override("font_size", 30)
+		tabs.add_child(b)
+	btn_tab_hira.button_pressed = select_tab == "hira"
+	btn_tab_kata.button_pressed = select_tab == "kata"
+	btn_tab_hira.pressed.connect(func(): select_tab = "hira"; show_select())
+	btn_tab_kata.pressed.connect(func(): select_tab = "kata"; show_select())
+	btn_distance = _button("")
+	btn_distance.custom_minimum_size = Vector2(w, 60)
+	btn_distance.add_theme_font_size_override("font_size", 28)
+	btn_distance.text = "距離：%s（點擊切換）" % distance_name()
+	btn_distance.pressed.connect(cycle_distance)
+	select_list.add_child(btn_distance)
+	select_scroll = ScrollContainer.new()
+	select_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	select_scroll.custom_minimum_size = Vector2(w, maxf(150.0, vs.y - 560.0))
+	select_list.add_child(select_scroll)
+	var list := VBoxContainer.new()
+	list.add_theme_constant_override("separation", 8)
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	select_scroll.add_child(list)
+	var zone := -1
+	var first_scroll_target: Control = null
 	for i in levels.size():
 		var L: Dictionary = levels[i]
+		if str(L.get("script", "hira")) != select_tab:
+			continue
+		if int(L.get("zone", 0)) != zone:
+			zone = int(L.get("zone", 0))
+			var zl := Label.new()
+			zl.text = ("第 %d 區" % zone) if zone > 0 else "最終關"
+			zl.add_theme_font_override("font", Assets.FONT_HUD)
+			zl.add_theme_font_size_override("font_size", 26)
+			zl.add_theme_color_override("font_color", Color(0.75, 0.75, 1.0))
+			list.add_child(zl)
 		var id := str(L.get("id"))
-		var unlocked := save.is_unlocked(levels, i)
-		var rec: Dictionary = save.get_record(id)
-		var txt := "%s" % str(L.get("name", id))
-		if not unlocked:
-			txt += "   鎖定"
-		elif rec.get("best_time", -1.0) >= 0.0:
-			txt += "   %s  %.1fs" % [_stars_text(int(rec.get("best_stars", 0))), float(rec.best_time)]
+		var E := LevelDB.effective(cfg, levels, i, distance)
+		var unlocked := save.is_unlocked(levels, i) and not bool(E.voice_locked)
+		var rec: Dictionary = save.get_record(id, distance)
+		var txt := "%s  %d題" % [str(L.get("name", id)), int(E.target_correct)]
+		if bool(E.voice_locked):
+			txt += "  缺語音"
+		elif not unlocked:
+			txt += "  鎖定"
+		elif float(rec.get("best_time", -1.0)) >= 0.0:
+			txt += "  %s %.1fs" % [_stars_text(int(rec.get("best_stars", 0))), float(rec.best_time)]
+		elif bool(rec.get("cleared", false)):
+			txt += "  通過"
 		var b := _button(txt)
-		b.custom_minimum_size = Vector2(480, 84)
+		b.custom_minimum_size = Vector2(w - 20, 64)
+		b.add_theme_font_size_override("font_size", 26)
+		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		b.disabled = not unlocked
 		b.pressed.connect(choose_level.bind(i))
-		select_list.add_child(b)
+		b.set_meta("level_index", i)
+		list.add_child(b)
 		level_buttons.append(b)
+		if unlocked:
+			first_scroll_target = b
 	btn_settings = _button("")
-	btn_settings.custom_minimum_size = Vector2(480, 72)
+	btn_settings.custom_minimum_size = Vector2(w, 60)
+	btn_settings.add_theme_font_size_override("font_size", 28)
 	btn_settings.pressed.connect(show_settings)
 	select_list.add_child(btn_settings)
 	_refresh_mode_buttons()
 	select_box.visible = true
+	if first_scroll_target != null:
+		select_scroll.ensure_control_visible.call_deferred(first_scroll_target)
 
 func choose_level(i: int) -> void:
 	if not save.is_unlocked(levels, i):
@@ -696,6 +869,10 @@ func reset_run() -> void:
 	shield = 0
 	max_hp = base_max_hp + max_hp_bonus
 	hp = max_hp
+	hp_delayed = float(hp); hp_delay_wait = 0.0
+	shield_phase = 0; boss_shield_up = false; break_progress = 0; shields_broken = 0
+	last_points = 0; last_record = {}; review_asked = 0
+	lbl_boss.text = ""
 	_emit_hp()
 	lbl_hint.text = ""; lbl_notice.text = ""
 	_spawn_rows()
@@ -708,7 +885,7 @@ func reset_run() -> void:
 	voice.stream_paused = false
 	music.stream_paused = false
 	touches.clear()
-	lbl_center.text = "%s\n\n按住「加速」加速、按住「煞車」煞車\n都不按 = 自然減速\n左右滑動換線（按著加速時也可以）\n\nPC: W/Space 加速, S 煞車, A/D 換線\nE 重播  Esc/P 暫停  F3 dev\n\nTap / Space to start" % str(lvl.get("name", "Level 1"))
+	lbl_center.text = "%s\n%s・%d 題\n%s\n\n按住「加速」加速、按住「煞車」煞車\n都不按 = 自然減速\n左右滑動換線（按著加速時也可以）\n\nPC: W/Space 加速, S 煞車, A/D 換線\nE 重播  Esc/P 暫停  F3 dev\n\nTap / Space to start" % [str(lvl.get("name", "Level 1")), distance_name(), int(lvl.target_correct), "小知識：" + str(lvl.get("knowledge", ""))]
 	lbl_float.text = ""
 	if music.playing:
 		music.stop()
@@ -732,10 +909,17 @@ func _spawn_rows() -> void:
 	var pool: Array = lvl.get("kana", ["あ"])
 	while next_row_dist < player_dist + spawn_ahead:
 		var r: Dictionary
+		var review: Array = lvl.get("review_kana", [])
+		var is_review := false
 		if requeue.size() > 0:
-			r = Rules.make_row_with_target(pool, requeue.pop_front(), -1, rng, lane_count)
+			var t: String = requeue.pop_front()
+			r = Rules.make_row_ex(pool if pool.has(t) else review, t, "", -1, rng, lane_count, lookalikes, same_sound)
+			is_review = not pool.has(t)
+		elif review.size() >= 2 and rng.randf() < review_ratio:
+			r = Rules.make_row_ex(review, "", last_target, -1, rng, lane_count, lookalikes, same_sound, pool)
+			is_review = true
 		else:
-			r = Rules.make_row(pool, last_target, rng, lane_count)
+			r = Rules.make_row_ex(pool, "", last_target, -1, rng, lane_count, lookalikes, same_sound)
 		last_target = r.kana[r.target]
 		var node := Node3D.new()
 		node.position = Vector3(0, 0, -next_row_dist)
@@ -750,8 +934,8 @@ func _spawn_rows() -> void:
 			st.position = Vector3(lane_x(i), 0.9, 0)
 			var lab := Label3D.new()
 			lab.name = "Kana"
-			lab.font = Assets.FONT_KANA
-			lab.font_size = 160
+			lab.font = Assets.FONT_HUD   # covers hiragana + katakana + small ゃゅょ
+			lab.font_size = 160 if str(r.kana[i]).length() < 2 else 100
 			lab.pixel_size = 0.006
 			lab.outline_size = 24
 			lab.position = Vector3(0, 0.1, 0.27)
@@ -759,14 +943,16 @@ func _spawn_rows() -> void:
 			node.add_child(st)
 			stones.append(st)
 		var row := {"dist": next_row_dist, "kana": r.kana, "target": r.target, "node": node,
-			"stones": stones, "resolved": false, "voice_t": -1.0, "q": 0, "hint": false, "retry": false}
+			"stones": stones, "resolved": false, "voice_t": -1.0, "q": 0, "hint": false, "retry": false, "review": is_review}
 		_apply_row_labels(row)
 		rows.append(row)
 		next_row_dist += row_spacing
 
 func _apply_row_labels(row: Dictionary) -> void:
 	for i in row.stones.size():
-		(row.stones[i].get_node("Kana") as Label3D).text = row.kana[i]
+		var lab := row.stones[i].get_node("Kana") as Label3D
+		lab.text = row.kana[i] if i < row.kana.size() else ""
+		lab.font_size = 160 if lab.text.length() < 2 else 100
 
 ## Wrong hit: the next row becomes the same question with the correct kana in a different lane.
 func _retry_in_next_row(after_row: Dictionary, kana: String, avoid_lane: int) -> void:
@@ -775,10 +961,16 @@ func _retry_in_next_row(after_row: Dictionary, kana: String, avoid_lane: int) ->
 		var nxt: Dictionary = rows[j]
 		if nxt.resolved or nxt.voice_t >= 0.0:
 			continue
-		var r := Rules.make_row_with_target(lvl.get("kana", ["あ"]), kana, avoid_lane, rng, lane_count)
+		var P: Array = lvl.get("kana", ["あ"])
+		var r := Rules.make_row_ex(P if P.has(kana) else lvl.get("review_kana", P), kana, "", avoid_lane, rng, lane_count, lookalikes, same_sound)
 		nxt.kana = r.kana
 		nxt.target = r.target
 		nxt.retry = true
+		for st in nxt.stones:
+			st.visible = false
+		for ii in r.kana.size():
+			if ii < nxt.stones.size():
+				nxt.stones[ii].visible = true
 		_apply_row_labels(nxt)
 		return
 
@@ -796,6 +988,8 @@ func _activate_next() -> void:
 	r.q = q_counter
 	r.voice_t = elapsed
 	var k: String = r.kana[r.target]
+	if r.get("review", false):
+		review_asked += 1
 	var seen: int = appearances.get(k, 0)
 	appearances[k] = seen + 1
 	var progress := float(correct) / maxf(1.0, float(lvl.get("target_correct", 20)))
@@ -807,9 +1001,11 @@ func _activate_next() -> void:
 	lbl_hint.modulate.a = 1.0 if r.hint else 0.6
 	play_voice(r)
 
+var _romaji_cache := {}
 func _romaji(k: String) -> String:
-	var idx: int = lvl.get("kana", []).find(k)
-	return lvl.get("romaji", [])[idx] if idx >= 0 else ""
+	if _romaji_cache.is_empty():
+		_romaji_cache = LevelDB.romaji_map(cfg)
+	return str(_romaji_cache.get(k, ""))
 
 func _notice(t: String) -> void:
 	lbl_notice.text = t
@@ -831,13 +1027,20 @@ func _set_combo(v: int) -> void:
 		tw.tween_property(lbl_combo, "scale", Vector2.ONE, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func play_voice(r) -> void:
-	var idx: int = lvl.get("kana", []).find(r.kana[r.target])
-	var romaji: String = lvl.get("romaji", [])[idx] if idx >= 0 else ""
+	var romaji := _romaji(r.kana[r.target])
 	voice.stream = Assets.VOICE.get(romaji)
 	if voice.stream:
 		voice.play()
 
+## Delayed red HP chunk: waits bar_wait_s after a hit, then drains to the real HP.
+func _tick_hp_bar(dt: float) -> void:
+	if hp_delay_wait > 0.0:
+		hp_delay_wait -= dt
+	elif hp_delayed > float(hp):
+		hp_delayed = maxf(float(hp), hp_delayed - bar_drain * dt)
+
 func _process(dt: float) -> void:
+	_tick_hp_bar(dt)
 	if state == State.RUNNING:
 		_tick(dt)
 	elif state == State.CLEARED or state == State.FAILED:
@@ -889,11 +1092,20 @@ func _resolve(r) -> void:
 		requeue.append(k)          # comes back later (next newly spawned row)
 		_set_combo(0)
 		_fx_miss(r)
-		if miss_costs_heart:
-			take_damage(1)
+		break_progress = 0
+		take_damage(miss_damage)
 	elif hit == r.target:
 		result = "correct"
-		correct += 1
+		if boss_shield_up:
+			result = "shield"
+			break_progress += 1
+			if break_progress >= break_chain:
+				boss_shield_up = false
+				shields_broken += 1
+				_notice("護盾擊破！")
+		else:
+			correct += 1
+			_check_boss_shield()
 		_set_combo(combo + 1)
 		_fx_correct(r.stones[hit])
 	else:
@@ -904,10 +1116,22 @@ func _resolve(r) -> void:
 		_set_combo(0)
 		_fx_wrong(r.stones[hit], r.stones[r.target])
 		_retry_in_next_row(r, k, r.target)
+		break_progress = 0
 		take_damage(wrong_damage)
 	logger.add(r.q, k, result, reaction, ctrl.kmh(), clock())
 	if state == State.RUNNING:
 		_activate_next()
+
+## Boss/ultimate: at each threshold of the required count, raise a shield that needs N correct in a row.
+func _check_boss_shield() -> void:
+	if shield_phase >= shield_thresholds.size():
+		return
+	var need := int(ceil(float(shield_thresholds[shield_phase]) * float(lvl.target_correct)))
+	if correct >= need and correct < int(lvl.target_correct):
+		shield_phase += 1
+		boss_shield_up = true
+		break_progress = 0
+		_notice("護盾展開！")
 
 func _finish(cleared: bool, reason := "") -> void:
 	fail_reason = "" if cleared else (reason if reason != "" else "time_up")
@@ -917,14 +1141,20 @@ func _finish(cleared: bool, reason := "") -> void:
 	music.stop()
 	var stars := Rules.stars_for(clock(), lvl) if cleared else 0
 	var new_best := false
+	last_points = 0
 	if cleared:
-		new_best = save.record(level_id, stars, clock())
+		last_record = save.record(level_id, distance, stars, clock())
+		new_best = bool(last_record.better)
+		last_points = Rules.points_for(bool(last_record.first_clear), int(last_record.new_stars), distance_multiplier(), cfg.get("points", {}))
+		save.add_points(last_points)
 		save.save_file()
-		lbl_result.text = "CLEAR!\n%s\n\nTime %.2f s\n(run %.2f + penalty %.1f)\nwrong %d   miss %d\nbest combo %d\n%s模式%s" % [
-			_stars_text(stars), clock(), elapsed, penalty, wrong, missed, best_combo, mode_name(), "\n新紀錄！" if new_best else ""]
+		lbl_result.text = "CLEAR!  %s\n%s  %s\n\nTime %.2f s\n(run %.2f + penalty %.1f)\nwrong %d  miss %d  combo %d\n體力 %d / %d   %s模式\n獲得點數 +%d（總點數 %d）%s\n\n小知識：%s" % [
+			_stars_text(stars), str(lvl.get("name", "")), distance_name(), clock(), elapsed, penalty, wrong, missed, best_combo,
+			hp, max_hp, mode_name(), last_points, save.points(), "\n新紀錄！" if new_best else "", str(lvl.get("knowledge", ""))]
 		sfx("shatter", 0.8, 2.0)
 	else:
-		lbl_result.text = "%s\n%d / %d\n%s模式" % ["體力耗盡" if fail_reason == "hp_out" else "時間到", correct, int(lvl.get("target_correct", 20)), mode_name()]
+		lbl_result.text = "%s\n%s  %s\n%d / %d   %s模式\n獲得點數 +0（總點數 %d）\n\n小知識：%s" % ["體力耗盡" if fail_reason == "hp_out" else "時間到",
+			str(lvl.get("name", "")), distance_name(), correct, int(lvl.get("target_correct", 20)), mode_name(), save.points(), str(lvl.get("knowledge", ""))]
 		sfx("back")
 	lbl_center.text = ""
 	lbl_hint.text = ""
@@ -935,10 +1165,11 @@ func _finish(cleared: bool, reason := "") -> void:
 	touches.clear()
 	results_box.visible = true
 	if dev_mode:
-		last_saved_path = logger.save("clear" if cleared else fail_reason, elapsed, clock(), stars, hp, speed_mode)
+		last_saved_path = logger.save("clear" if cleared else fail_reason, elapsed, clock(), stars, hp, speed_mode, distance, last_points, int(lvl.target_correct))
 		print("[dev] timing saved: ", last_saved_path)
-	print("[result] %s %s%s clock=%.3f elapsed=%.3f penalty=%.1f correct=%d wrong=%d miss=%d stars=%d" % [
-		level_id, "CLEAR" if cleared else "FAIL", "" if cleared else "(" + fail_reason + ")", clock(), elapsed, penalty, correct, wrong, missed, stars])
+	lbl_boss.text = ""
+	print("[result] %s %s %s%s clock=%.3f elapsed=%.3f penalty=%.1f correct=%d wrong=%d miss=%d stars=%d" % [
+		level_id, distance, "CLEAR" if cleared else "FAIL", "" if cleared else "(" + fail_reason + ")", clock(), elapsed, penalty, correct, wrong, missed, stars])
 
 # ---------------------------------------------------------------- feedback
 func _float_text(t: String, c: Color) -> void:
@@ -1045,6 +1276,16 @@ func _update_hud() -> void:
 	lbl_combo.pivot_offset = lbl_combo.size * 0.5
 	var in_game := state != State.SELECT
 	lbl_time.visible = in_game; lbl_count.visible = in_game; lbl_speed.visible = in_game; hearts_box.visible = in_game
+	_refresh_hp_bar()
+	var vw: float = get_viewport().get_visible_rect().size.x
+	lbl_result.custom_minimum_size.x = minf(620.0, vw - 110.0)   # wrap long knowledge text inside the panel
+	if state == State.RUNNING and boss_shield_up:
+		lbl_boss.text = "護盾 連續答對 %d / %d" % [break_progress, break_chain]
+	elif state == State.RUNNING and shield_thresholds.size() > 0:
+		lbl_boss.text = "BOSS 護盾 %d / %d 已擊破" % [shields_broken, shield_thresholds.size()]
+	else:
+		lbl_boss.text = ""
+	lbl_boss.visible = state == State.RUNNING
 	var playing := state == State.RUNNING or state == State.READY
 	for b in [btn_accel, btn_brake, btn_pause, btn_voice]:
 		b.visible = playing

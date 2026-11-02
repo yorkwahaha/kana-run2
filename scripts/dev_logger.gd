@@ -6,6 +6,8 @@ extends RefCounted
 var entries: Array = []
 var level_id := ""
 
+const RUNS_FILE := "user://timing/runs_v4.csv"
+
 func start(lvl_id: String) -> void:
 	level_id = lvl_id
 	entries.clear()
@@ -23,7 +25,7 @@ func avg_reaction(result := "correct") -> float:
 	return s / n if n > 0 else 0.0
 
 ## outcome: "clear", "time_up" or "hp_out"
-func save(outcome: String, elapsed_s: float, clock_s: float, stars: int, hp_left := -1, mode := "") -> String:
+func save(outcome: String, elapsed_s: float, clock_s: float, stars: int, hp_left := -1, mode := "", distance := "", points := 0, target := 0) -> String:
 	DirAccess.make_dir_recursive_absolute("user://timing")
 	var stamp := Time.get_datetime_string_from_system().replace(":", "").replace("-", "").replace("T", "_")
 	var base := "user://timing/run_%s" % stamp
@@ -31,7 +33,7 @@ func save(outcome: String, elapsed_s: float, clock_s: float, stars: int, hp_left
 	for e in entries:
 		counts[e.result] = counts.get(e.result, 0) + 1
 	var summary := {"level": level_id, "outcome": outcome, "elapsed_s": snappedf(elapsed_s, 0.001),
-		"clock_s": snappedf(clock_s, 0.001), "stars": stars, "hp_left": hp_left, "mode": mode, "counts": counts,
+		"clock_s": snappedf(clock_s, 0.001), "stars": stars, "hp_left": hp_left, "mode": mode, "distance": distance, "target_correct": target, "points": points, "counts": counts,
 		"avg_reaction_correct_s": snappedf(avg_reaction(), 0.001), "questions": entries}
 	var f := FileAccess.open(base + ".json", FileAccess.WRITE)
 	if f:
@@ -39,18 +41,18 @@ func save(outcome: String, elapsed_s: float, clock_s: float, stars: int, hp_left
 		f.close()
 	f = FileAccess.open(base + ".csv", FileAccess.WRITE)
 	if f:
-		f.store_line("q,target,result,reaction_s,speed_kmh,clock_s,mode")
+		f.store_line("q,target,result,reaction_s,speed_kmh,clock_s,mode,distance")
 		for e in entries:
-			f.store_line("%d,%s,%s,%.3f,%.1f,%.3f,%s" % [e.q, e.target, e.result, e.reaction_s, e.speed_kmh, e.clock_s, mode])
+			f.store_line("%d,%s,%s,%.3f,%.1f,%.3f,%s,%s" % [e.q, e.target, e.result, e.reaction_s, e.speed_kmh, e.clock_s, mode, distance])
 		f.close()
-	var runs := "user://timing/runs_v3.csv"   # v2 added hp_left, v3 adds mode
+	var runs := RUNS_FILE   # v2 hp_left, v3 mode, v4 distance/target/points
 	var new_file := not FileAccess.file_exists(runs)
 	f = FileAccess.open(runs, FileAccess.READ_WRITE if not new_file else FileAccess.WRITE)
 	if f:
 		if new_file:
-			f.store_line("stamp,level,outcome,elapsed_s,clock_s,stars,correct,wrong,miss,avg_reaction_s,hp_left,mode")
+			f.store_line("stamp,level,outcome,elapsed_s,clock_s,stars,correct,wrong,miss,avg_reaction_s,hp_left,mode,distance,target,points")
 		f.seek_end()
-		f.store_line("%s,%s,%s,%.3f,%.3f,%d,%d,%d,%d,%.3f,%d,%s" % [stamp, level_id, outcome, elapsed_s, clock_s, stars,
-			counts.correct, counts.wrong, counts.miss, avg_reaction(), hp_left, mode])
+		f.store_line("%s,%s,%s,%.3f,%.3f,%d,%d,%d,%d,%.3f,%d,%s,%s,%d,%d" % [stamp, level_id, outcome, elapsed_s, clock_s, stars,
+			counts.correct, counts.wrong, counts.miss, avg_reaction(), hp_left, mode, distance, target, points])
 		f.close()
 	return ProjectSettings.globalize_path(base + ".json")

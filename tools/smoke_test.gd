@@ -8,6 +8,8 @@ const Rules = preload("res://scripts/rules.gd")
 const Assets = preload("res://scripts/asset_manifest.gd")
 const SaveData = preload("res://scripts/save_data.gd")
 const GameConfig = preload("res://scripts/game_config.gd")
+const LevelDB = preload("res://scripts/level_db.gd")
+const DevLogger = preload("res://scripts/dev_logger.gd")
 
 var game
 var frames := 0
@@ -264,7 +266,8 @@ func feature_tests(g) -> void:
 	var seen := {}
 	var hint_ok := true
 	var notice_before := false
-	while g.correct < 10:
+	g.set_level(0); g.reset_run(); g.start_run()
+	while g.correct < 8:
 		var r = g.active_row()
 		var k: String = r.kana[r.target]
 		var n: int = seen.get(k, 0)
@@ -274,7 +277,7 @@ func feature_tests(g) -> void:
 		if g.voice_only_announced: notice_before = true
 		_answer(g, "correct")
 	check(hint_ok, "romaji hint shown exactly for each kana's first 3 appearances")
-	check(not notice_before, "no voice-only notice before 50%")
+	check(not notice_before, "no voice-only notice before 50%% (8/15 is the switch)")
 	var r2 = g.active_row()
 	check(not r2.hint and g.lbl_hint.text == "?", "after 50%% progress the question is voice-only")
 	check(g.voice_only_announced and g.lbl_notice.text == "聽音模式", "「聽音模式」notice shown on switch")
@@ -311,16 +314,17 @@ func feature_tests(g) -> void:
 	g.reset_run(); g.start_run()
 	g.set_max_hp(999, true)   # this test is about re-queue termination, not HP
 	var steps := 0
-	while g.correct < 20 and steps < 500:
+	var need: int = int(g.lvl.target_correct)
+	while g.correct < need and steps < 500:
 		var p := rng.randf()
 		_answer(g, "correct" if p < 0.6 else ("wrong" if p < 0.85 else "miss"))
 		steps += 1
-	check(g.correct >= 20 and steps < 500, "mixed correct/wrong/miss still reaches 20 correct (%d rows)" % steps)
+	check(g.correct >= need and steps < 500, "mixed correct/wrong/miss still reaches %d correct (%d rows)" % [need, steps])
 
 var reg_game
 var auto_level := 0
 var auto_i := 0
-const AUTO_RUNS := [[0, "race"], [1, "race"], [0, "step"], [1, "step"]]
+const AUTO_RUNS := [[0, "race"], [3, "race"], [20, "race"], [0, "step"], [3, "step"], [20, "step"]]
 var phase := "unit"
 var layout_i := 0
 var layout_wait := 0
@@ -347,77 +351,73 @@ func _start_autopilot() -> void:
 	game.force_mode = AUTO_RUNS[auto_i][1]
 	game.force_dev_mode = true
 	game.rng_seed = 7
+	game.force_distance = "short"
 	root.add_child(game)
-
-func _hearts(g) -> String:
-	var t := ""
-	for c in g.hearts_box.get_children():
-		if c != g.lbl_shield: t += c.text
-	return t
 
 func hp_tests(g) -> void:
 	print("HP")
 	var cfg: Dictionary = GameConfig.load_config()
-	check(int(cfg.hp.max_hp) == 3 and cfg.hp.miss_costs_heart == false, "config: 3 hearts, miss costs no heart by default")
+	check(int(cfg.hp.max_hp) == 100 and int(cfg.hp.wrong_damage) == 35 and int(cfg.hp.miss_damage) == 0, "config: HP 100, wrong -35, miss 0 by default")
 	g.set_level(0); g.reset_run(); g.start_run()
-	check(g.hp == 3 and g.max_hp == 3 and _hearts(g) == "♥♥♥", "run starts with 3 hearts")
+	check(g.hp == 100 and g.max_hp == 100 and g.lbl_hp.text == "100 / 100", "run starts at 100 / 100")
 	var got := []
 	var cb := func(h, m, sh): got.append([h, m, sh])
 	g.hp_changed.connect(cb)
 	g.ctrl.speed = 10.0
 	var p0: float = g.penalty
 	_answer(g, "wrong")
-	check(g.hp == 2 and _hearts(g) == "♥♥♡", "wrong hit = -1 heart")
+	check(g.hp == 65 and g.lbl_hp.text == "65 / 100", "wrong hit = -35 HP")
 	check(is_equal_approx(g.penalty - p0, 2.0) and is_equal_approx(g.ctrl.speed, 5.0), "wrong hit still -2 s and speed halved")
-	check(got.size() >= 1 and got[-1][0] == 2, "hp_changed signal emitted")
+	check(got.size() >= 1 and got[-1][0] == 65, "hp_changed signal emitted")
+	check(g.hp_delayed > 65.0 and g.hp_chunk.offset_right > g.hp_fill.offset_right, "delayed red chunk stays visible right after the hit")
+	for i in 200: g._tick_hp_bar(1.0 / 60.0)
+	check(is_equal_approx(g.hp_delayed, 65.0), "delayed chunk drains down to the real HP (%.1f)" % g.hp_delayed)
 	check(g.cam.h_offset == 0.0 and g.cam.v_offset == 0.0, "no camera/screen shake on damage")
 	_answer(g, "miss")
-	check(g.hp == 2, "miss costs no heart by default")
+	check(g.hp == 65, "miss costs no HP by default")
 	g.elapsed = 0.0
 	for i in 30: g._tick(1.0 / 60.0)
-	check(g.hp == 2, "no passive HP drain")
+	check(g.hp == 65, "no passive HP drain")
 	_answer(g, "wrong")
-	check(g.hp == 1 and g.state == g.State.RUNNING, "1 heart left, still running")
+	check(g.hp == 30 and g.state == g.State.RUNNING, "30 HP left, still running")
 	_answer(g, "wrong")
 	check(g.hp == 0 and g.state == g.State.FAILED and g.fail_reason == "hp_out", "0 HP ends the run immediately (reason hp_out)")
 	check(g.lbl_result.text.begins_with("體力耗盡") and g.results_box.visible, "results show 「體力耗盡」")
-	check(not g.save.get_record("level_01").get("cleared", false), "hp_out is not saved as a clear")
+	check(not g.save.cleared_any("1-1"), "hp_out is not saved as a clear")
 	g.hp_changed.disconnect(cb)
-	# time-up reason
 	g.reset_run(); g.start_run(); g.elapsed = 999.0; g._tick(0.0)
 	check(g.fail_reason == "time_up" and g.lbl_result.text.begins_with("時間到"), "time-up shows 「時間到」 (distinct reason)")
-	# miss switch
-	g.reset_run(); g.start_run(); g.miss_costs_heart = true
+	g.reset_run(); g.start_run(); g.miss_damage = 20
 	_answer(g, "miss")
-	check(g.hp == 2, "miss_costs_heart switch: miss = -1 heart")
-	g.set_level(0)
-	# per-level override
+	check(g.hp == 80, "miss_damage switch: miss = -20")
 	var lv: Array = GameConfig.levels(cfg)
-	lv[0]["max_hp"] = 5; lv[0]["miss_costs_heart"] = true
+	lv[0]["max_hp"] = 150; lv[0]["miss_damage"] = 10
 	g.levels = lv; g.set_level(0); g.reset_run()
-	check(g.max_hp == 5 and g.hp == 5 and g.miss_costs_heart, "per-level max_hp / miss_costs_heart override")
+	check(g.max_hp == 150 and g.hp == 150 and g.miss_damage == 10, "per-level max_hp / miss_damage override")
 	g.levels = GameConfig.levels(GameConfig.load_config()); g.set_level(0); g.reset_run(); g.start_run()
-	# hooks
 	g.add_shield(1)
-	check(g.lbl_shield.text == "盾×1", "shield shown")
+	check(g.lbl_shield.text == "盾1", "shield shown")
 	var blocked := []
 	var dcb := func(a, b): blocked.append(b)
 	g.damaged.connect(dcb)
-	check(not g.take_damage(1) and g.hp == 3 and g.shield == 0 and blocked == [true], "shield (charm) blocks one damage")
-	g.take_damage(1)
-	check(g.hp == 2 and blocked[-1] == false, "next damage goes through")
+	check(not g.take_damage(35) and g.hp == 100 and g.shield == 0 and blocked == [true], "shield (charm) blocks one hit")
+	g.take_damage(35)
+	check(g.hp == 65 and blocked[-1] == false, "next hit goes through")
 	g.damaged.disconnect(dcb)
-	g.heal(1); g.heal(5)
-	check(g.hp == 3, "heal +1, capped at max")
-	g.set_max_hp_bonus(2)
-	check(g.max_hp == 5 and g.hp == 5 and _hearts(g) == "♥♥♥♥♥", "max-HP upgrade hook (+2) refills to 5")
+	g.heal(20); g.heal(50)
+	check(g.hp == 100, "heal(value), capped at max")
+	g.set_damage_reduction(20.0)
+	g.take_damage(35)
+	check(g.hp == 72, "damage_reduction 20%%: 35 -> 28")
+	g.set_damage_reduction(0.0)
+	g.set_max_hp_bonus(50)
+	check(g.max_hp == 150 and g.hp == 150, "max-HP upgrade hook (+50) refills to 150")
 	g.reset_run()
-	check(g.max_hp == 5, "max-HP bonus persists across restarts")
+	check(g.max_hp == 150, "max-HP bonus persists across restarts")
 	g.set_max_hp_bonus(0); g.reset_run()
-	check(g.max_hp == 3, "bonus removable")
-	# dev log reason
+	check(g.max_hp == 100, "bonus removable")
 	g.force_dev_mode = true; g.dev_mode = true
-	g.start_run(); g.take_damage(3)
+	g.start_run(); g.take_damage(100)
 	var j = JSON.parse_string(FileAccess.get_file_as_string(g.last_saved_path))
 	check(j is Dictionary and j.outcome == "hp_out" and int(j.hp_left) == 0, "timing log records outcome hp_out")
 	g.dev_mode = false
@@ -478,72 +478,193 @@ func mode_game_tests(g) -> void:
 	g.set_speed_mode("step")
 	g.force_dev_mode = true; g.dev_mode = true
 	g.set_level(0); g.reset_run(); g.start_run()
-	while g.correct < 20: _answer(g, "correct")
+	while g.correct < int(g.lvl.target_correct): _answer(g, "correct")
 	g._tick(0.0)
 	check(g.lbl_result.text.contains("點放模式"), "results show mode")
 	var j = JSON.parse_string(FileAccess.get_file_as_string(g.last_saved_path))
 	check(j is Dictionary and j.mode == "step", "timing JSON records mode")
-	var csv := FileAccess.get_file_as_string("user://timing/runs_v3.csv").strip_edges().split("\n")
-	check(csv[0].ends_with(",mode") and csv[-1].ends_with(",step"), "runs_v3.csv has mode column")
+	check(j.distance == g.distance and int(j.target_correct) == int(g.lvl.target_correct) and j.has("points"), "timing JSON records distance / target / points")
+	var csv := FileAccess.get_file_as_string(DevLogger.RUNS_FILE).strip_edges().split("\n")
+	check(DevLogger.RUNS_FILE.ends_with("runs_v4.csv") and csv[0].ends_with(",mode,distance,target,points") and csv[-1].contains(",step,%s," % g.distance), "runs_v4.csv has mode + distance columns")
 	g.dev_mode = false
 	g.set_speed_mode("race")
 	g.save.clear_all(); g.save.save_file()
 	g.set_level(0)
 
 func level_tests(g) -> void:
-	print("level data")
-	var lv: Array = GameConfig.levels(GameConfig.load_config())
-	check(lv.size() >= 2 and lv[0].id == "level_01" and lv[1].id == "level_02", "levels loaded in order from config (%d)" % lv.size())
-	check(int(lv[0].target_correct) == 20 and float(lv[0].time_limit_s) == 63.0 and float(lv[0].star2_s) == 47.0 and float(lv[0].star3_s) == 36.0, "level 1: 20 / 63 / 47 / 36 unchanged")
-	check(int(lv[1].target_correct) == 30 and float(lv[1].time_limit_s) == 91.0 and float(lv[1].star2_s) == 68.0 and float(lv[1].star3_s) == 52.0, "level 2: 30 / 91 / 68 / 52")
-	check("".join(lv[1].kana) == "あいうえおかきくけこ", "level 2 pool = あ行 + か行")
-	var voices_ok := true
+	print("level table (Kana Warrior skeleton)")
+	var cfg: Dictionary = GameConfig.load_config()
+	var lv: Array = GameConfig.levels(cfg)
+	var hira := lv.filter(func(L): return L.script == "hira")
+	var kata := lv.filter(func(L): return L.script == "kata")
+	check(hira.size() == 21 and kata.size() == 12, "21 hiragana + 12 katakana stages (%d + %d)" % [hira.size(), kata.size()])
+	var shape := ""
+	for L in hira: shape += {"normal": "n", "boss": "B", "ultimate": "U"}[L.type]
+	check(shape == "nnnBnnnBnnnBnnnBnnnBU", "hiragana: 5 zones x (3 stages + boss) + ultimate (%s)" % shape)
+	shape = ""
+	for L in kata: shape += {"normal": "n", "boss": "B", "ultimate": "U"}[L.type]
+	check(shape == "nnnBnnnBnnnU", "katakana follows KATAKANA_STAGES (nnnB nnnB nnn U) (%s)" % shape)
+	check(lv[0].id == "1-1" and lv[0].name == "1-1 あ行" and lv[1].id == "1-2" and lv[3].name.begins_with("1-BOSS") and lv[20].name.begins_with("究極魔王"), "neutral names: 1-1 あ行 / 1-BOSS … / 究極魔王")
+	check(lv[3].rows == ["あ行", "か行", "さ行"] and lv[20].rows.size() == 26 and lv[24].rows == ["ア行", "カ行", "サ行"], "poolRows copied (1-BOSS = あかさ, ultimate = all 26 rows)")
+	var kn_ok := true
+	var missing_glyphs := ""
 	for L in lv:
-		if L.kana.size() != L.romaji.size(): voices_ok = false
-		for r in L.romaji:
-			if not Assets.VOICE.has(r) or Assets.VOICE[r] == null: voices_ok = false
-	check(voices_ok, "every level kana has a preloaded voice clip")
-	print("level 2 rules")
-	g.set_level(1); g.reset_run(); g.start_run()
-	check(g.level_id == "level_02" and g.hint_first_n == 3 and is_equal_approx(g.hint_ratio, 0.5), "level 2 uses hint rules (3 / 0.5)")
-	var seen := {}
-	var ok := true
+		if str(L.get("knowledge", "")).length() < 8: kn_ok = false
+		for ch in str(L.knowledge) + str(L.name):
+			if ch.unicode_at(0) > 0x2000 and not Assets.FONT_HUD.has_char(ch.unicode_at(0)):
+				kn_ok = false; missing_glyphs += ch
+	check(kn_ok, "every stage has knowledge text and the HUD font covers names + knowledge %s" % missing_glyphs)
+	check(cfg.kata_lookalikes.get("シ", []).has("ツ") and cfg.kata_lookalikes.size() >= 20, "KATA_LOOKALIKES loaded (%d)" % cfg.kata_lookalikes.size())
+	print("distances / counts / limits")
+	var want := {"short": [15, 25, 40], "mid": [20, 35, 55], "long": [30, 50, 75]}
+	var cnt_ok := true
+	for d in want:
+		if LevelDB.effective(cfg, lv, 0, d).target_correct != want[d][0] or LevelDB.effective(cfg, lv, 3, d).target_correct != want[d][1] \
+				or LevelDB.effective(cfg, lv, 20, d).target_correct != want[d][2]: cnt_ok = false
+	check(cnt_ok, "required correct per distance: normal 15/20/30, boss 25/35/50, ultimate 40/55/75")
+	var e := LevelDB.effective(cfg, lv, 0, "short")
+	check(e.time_limit_s == 48.0 and e.star2_s == 36.0 and e.star3_s == 28.0, "1-1 短程: T_dev 15x1.6=24 -> clear 48 / 2★ 36 / 3★ 28 (%s/%s/%s)" % [e.time_limit_s, e.star2_s, e.star3_s])
+	e = LevelDB.effective(cfg, lv, 3, "long")
+	check(e.time_limit_s == 180.0 and e.star2_s == 135.0 and e.star3_s == 104.0, "1-BOSS 長程: 50x1.8=90 -> 180 / 135 / 104 (%s/%s/%s)" % [e.time_limit_s, e.star2_s, e.star3_s])
+	e = LevelDB.effective(cfg, lv, 20, "mid")
+	check(e.time_limit_s == 198.0 and e.star2_s == 149.0 and e.star3_s == 114.0, "ultimate 中程: 55x1.8=99 -> 198 / 149 / 114 (ceil) (%s/%s/%s)" % [e.time_limit_s, e.star2_s, e.star3_s])
+	check(bool(cfg.limit_formula.provisional), "limits marked provisional in config")
+	print("voices / katakana lock")
+	var miss_all := {}
+	var locked := []
+	var voices_ok := true
+	for i in lv.size():
+		var E := LevelDB.effective(cfg, lv, i, "short")
+		for k in E.missing_voice: miss_all[k] = true
+		if E.voice_locked: locked.append(E.id)
+		for r in E.romaji:
+			if not LevelDB.has_voice(r): voices_ok = false
+	check(voices_ok, "every askable kana has a preloaded voice clip")
+	check(miss_all.keys().all(func(k): return "ぢづヂヅ".contains(k)), "only ぢ/づ/ヂ/ヅ lack a clip (dropped from questions): %s" % str(miss_all.keys()))
+	check(locked.is_empty(), "no stage needs locking for missing voices (katakana reuse the same romaji clips) %s" % str(locked))
+	var LK := lv.duplicate(true)
+	LK[1]["rows"] = ["ヴ行"]   # simulate a row with no clips
+	check(LevelDB.effective(cfg, LK, 1, "short").voice_locked, "stage with <3 voiced kana is voice-locked")
+	print("review / lookalikes / same sound")
+	check(LevelDB.effective(cfg, lv, 0, "short").review_kana.is_empty(), "1-1 has no review kana")
+	var e2 := LevelDB.effective(cfg, lv, 2, "short")
+	check("".join(e2.review_kana) == "あいうえおかきくけこ" and "".join(e2.kana) == "さしすせそ", "1-3 さ行 reviews あ行+か行 (learned rows)")
+	check(LevelDB.effective(cfg, lv, 21, "short").review_kana.is_empty(), "片1-1 has no review (katakana learned list is separate)")
+	g.set_level(2); g.reset_run(); g.start_run()
+	var rv := 0
+	var tot := 0
 	var pool_ok := true
-	var ka_seen := false
-	while g.correct < 15:
+	while tot < 400:
 		var r = g.active_row()
-		var k: String = r.kana[r.target]
+		if r.review: rv += 1
 		for x in r.kana:
-			if not lv[1].kana.has(x): pool_ok = false
-		if "かきくけこ".contains(k): ka_seen = true
-		var n: int = seen.get(k, 0)
-		if r.hint != (n < 3): ok = false
-		seen[k] = n + 1
+			if not (e2.kana.has(x) or e2.review_kana.has(x)): pool_ok = false
+		tot += 1
+		g.correct = 0
 		_answer(g, "correct")
-	check(pool_ok and ka_seen, "level 2 rows use only its 10 kana, か行 appears")
-	check(ok, "level 2 hint shown for first 3 per kana")
-	check(not g.active_row().hint and g.voice_only_announced, "level 2 voice-only after 15/30")
-	while g.correct < 30:
-		_answer(g, "correct")
-	g._tick(0.0)
-	check(g.state == g.State.CLEARED, "level 2 clears at 30 correct")
+	check(pool_ok, "rows only use current + learned kana")
+	check(rv > tot * 0.12 and rv < tot * 0.28, "~20%% review questions (%d / %d)" % [rv, tot])
+	var rng := RandomNumberGenerator.new(); rng.seed = 5
+	var ss_ok := true
+	var look_hit := 0
+	for i in 300:
+		var r := Rules.make_row_ex(["わ","を","ん","お","あ"], "を" if i % 2 == 0 else "お", "", -1, rng, 3, {}, cfg.same_sound)
+		if r.kana.has("を") and r.kana.has("お"): ss_ok = false
+		var k := Rules.make_row_ex(["シ","ツ","ソ","ン","ア","イ"], "シ", "", -1, rng, 3, cfg.kata_lookalikes, cfg.same_sound)
+		if k.kana.has("ツ") or k.kana.has("ン") or k.kana.has("ソ"): look_hit += 1
+	check(ss_ok, "お / を (same sound) never share a row")
+	check(look_hit == 300, "katakana rows put a lookalike trap next to the target (シ -> ツ/ン/ソ)")
+	print("boss shield")
+	g.set_level(3); g.reset_run(); g.start_run()
+	check(g.lvl.target_correct == 25 and g.shield_thresholds == [0.3, 0.6] and g.break_chain == 2, "1-BOSS 短程: 25 correct, shields at 30%%/60%%, break chain 2")
+	while g.correct < 8: _answer(g, "correct")
+	check(g.boss_shield_up and g.lbl_notice.text == "護盾展開！", "shield rises at ceil(0.3x25)=8 correct")
+	_answer(g, "correct")
+	check(g.correct == 8 and g.break_progress == 1, "correct while shielded does not count toward progress")
+	_answer(g, "wrong")
+	check(g.break_progress == 0 and g.boss_shield_up, "wrong hit resets the break chain")
+	_answer(g, "correct"); _answer(g, "correct")
+	check(not g.boss_shield_up and g.shields_broken == 1 and g.correct == 8, "2 in a row break the shield")
+	while g.correct < 15: _answer(g, "correct")
+	check(g.boss_shield_up and g.shield_phase == 2, "second shield at ceil(0.6x25)=15")
+	g.set_level(0); g.reset_run()
+	check(g.shield_thresholds.is_empty(), "normal stages have no shield")
+	g.set_distance("long", false); g.set_level(3)
+	check(g.lvl.target_correct == 50, "shield phases follow the chosen distance count (長程 50 -> 15 / 30)")
+	g.set_distance("short", false); g.set_level(0)
 
 func save_tests() -> void:
-	print("save / unlock")
-	var lv: Array = GameConfig.levels(GameConfig.load_config())
+	print("save / unlock / per-distance records / points")
+	var cfg: Dictionary = GameConfig.load_config()
+	var lv: Array = GameConfig.levels(cfg)
 	var sd = SaveData.new(); sd.path = "user://selftest_save2.json"; sd.clear_all()
-	check(sd.is_unlocked(lv, 0) and not sd.is_unlocked(lv, 1), "fresh save: only level 1 open")
-	check(sd.record("level_01", 2, 40.0), "first clear is recorded")
-	check(sd.is_unlocked(lv, 1), "clearing level 1 unlocks level 2")
-	check(not sd.record("level_01", 1, 45.0), "worse run does not count as better")
-	var r: Dictionary = sd.get_record("level_01")
-	check(int(r.best_stars) == 2 and is_equal_approx(float(r.best_time), 40.0), "best kept after worse run")
-	check(sd.record("level_01", 3, 31.3), "better run recorded")
-	check(not sd.record("level_01", 2, 35.0), "slower 2-star does not overwrite")
+	check(sd.is_unlocked(lv, 0) and not sd.is_unlocked(lv, 1), "fresh save: only 1-1 open")
+	var r1: Dictionary = sd.record("1-1", "long", 2, 40.0)
+	check(r1.first_clear and r1.new_stars == 2 and r1.better, "first clear recorded at 長程")
+	check(sd.is_unlocked(lv, 1), "clearing at any distance (長程) unlocks 1-2")
+	check(not sd.get_record("1-1", "short").cleared and sd.get_record("1-1", "long").cleared, "records are per distance")
+	var r2: Dictionary = sd.record("1-1", "long", 1, 45.0)
+	check(not r2.better and not r2.first_clear and r2.new_stars == 0, "worse run does not count as better")
+	check(int(sd.get_record("1-1", "long").best_stars) == 2 and is_equal_approx(float(sd.get_record("1-1", "long").best_time), 40.0), "best kept after worse run")
+	var r3: Dictionary = sd.record("1-1", "long", 3, 31.3)
+	check(r3.better and r3.new_stars == 1, "better run: +1 new star")
+	sd.record("1-1", "short", 1, 50.0)
+	check(int(sd.get_record("1-1", "short").best_stars) == 1 and int(sd.get_record("1-1", "long").best_stars) == 3, "short and long bests independent")
+	var P: Dictionary = cfg.points
+	check(Rules.points_for(true, 0, 1.0, P) == 10 and Rules.points_for(true, 3, 1.0, P) == 25, "points: first clear 10, +5 per new star (3★ first = 25)")
+	check(Rules.points_for(false, 0, 1.0, P) == 2 and Rules.points_for(false, 1, 1.0, P) == 7, "points: repeat clear 2 (+5 if a new star)")
+	check(Rules.points_for(true, 2, 1.5, P) == 30 and Rules.points_for(false, 0, 1.5, P) == 3 and Rules.points_for(true, 3, 2.2, P) == 55 and Rules.points_for(false, 0, 2.2, P) == 4, "multipliers 中x1.5 長x2.2, round half up (2x2.2=4.4->4, 2x1.5=3)")
+	sd.add_points(25); sd.add_points(3)
+	sd.set_setting("distance", "mid")
 	check(sd.save_file(), "save written")
 	var sd2 = SaveData.new(); sd2.path = sd.path; sd2.load_file()
-	r = sd2.get_record("level_01")
-	check(int(r.best_stars) == 3 and is_equal_approx(float(r.best_time), 31.3) and sd2.is_unlocked(lv, 1), "save reloads: 3 stars, 31.3 s, level 2 open")
+	check(int(sd2.get_record("1-1", "long").best_stars) == 3 and is_equal_approx(float(sd2.get_record("1-1", "long").best_time), 31.3) and sd2.is_unlocked(lv, 1), "save reloads per-distance records")
+	check(sd2.points() == 28 and sd2.get_setting("distance") == "mid", "total points + distance choice persist")
+	check(not sd2.is_unlocked(lv, 21), "片1-1 locked until 1-BOSS cleared")
+	sd2.record("1-BOSS", "short", 1, 80.0)
+	check(sd2.is_unlocked(lv, 21), "片1-1 opens after 1-BOSS (unlock_after)")
+	var f := FileAccess.open("user://selftest_v1.json", FileAccess.WRITE)
+	f.store_string(JSON.stringify({"version": 1, "levels": {"level_01": {"cleared": true, "best_stars": 3, "best_time": 31.3}, "level_02": {"cleared": true, "best_stars": 2, "best_time": 50.0}}, "settings": {"speed_mode": "step"}}))
+	f.close()
+	var sd3 = SaveData.new(); sd3.path = "user://selftest_v1.json"; sd3.load_file()
+	check(sd3.migrated_from == 1 and sd3.get_record("1-1", "short").cleared and sd3.get_record("1-2", "short").cleared and int(sd3.get_record("1-1", "short").best_stars) == 0, "v1 save migrated: L1/L2 -> 1-1/1-2 cleared at 短程, stars/times reset")
+	check(sd3.is_unlocked(lv, 2) and not sd3.is_unlocked(lv, 3) and sd3.get_setting("speed_mode") == "step" and sd3.points() == 0, "migration keeps unlocks + settings, no points")
+
+func distance_tests(g) -> void:
+	print("distance toggle")
+	g.save.clear_all(); g.save.save_file()
+	g.set_distance("short"); g.show_select()
+	check(g.btn_distance.text.contains("短程"), "level select shows 距離：短程")
+	g.btn_distance.pressed.emit()
+	check(g.distance == "mid" and g.btn_distance.text.contains("中程"), "toggle -> 中程")
+	var sd = SaveData.new(); sd.path = g.save.path; sd.load_file()
+	check(sd.get_setting("distance") == "mid", "distance choice saved")
+	g.btn_distance.pressed.emit(); g.btn_distance.pressed.emit()
+	check(g.distance == "short", "toggle cycles 短程 -> 中程 -> 長程 -> 短程")
+	g.btn_distance.pressed.emit()
+	g.choose_level(0)
+	check(g.lvl.target_correct == 20 and g.lvl.time_limit_s == 64.0, "中程 1-1: 20 correct, clear 64 s")
+	g.start_run()
+	while g.correct < 20: _answer(g, "correct")
+	g._tick(0.0)
+	check(g.state == g.State.CLEARED and g.lbl_result.text.contains("中程") and g.lbl_result.text.contains("獲得點數"), "results show distance + 獲得點數")
+	var first_pts: int = g.last_points
+	check(first_pts == Rules.points_for(true, g.last_record.new_stars, 1.5, g.cfg.points) and g.save.points() == first_pts, "first clear points x1.5 saved as total (%d)" % first_pts)
+	check(g.save.get_record("1-1", "mid").cleared and not g.save.get_record("1-1", "short").cleared, "clear recorded under 中程 only")
+	check(g.can_go_next(), "中程 clear unlocks 1-2")
+	g.reset_run(); g.start_run(); g.elapsed = 0.0
+	while g.correct < 20: _answer(g, "correct")
+	g.penalty = 63.0   # slower than any star improvement, still inside the limit
+	g._tick(0.0)
+	check(g.state == g.State.CLEARED and g.last_points == 3 and g.save.points() == first_pts + 3, "repeat clear (no new star) = 2 x1.5 -> 3 points (%d)" % g.last_points)
+	check(g.lbl_result.text.contains("總點數 %d" % g.save.points()), "results show total points")
+	var g2 = load("res://scenes/main.tscn").instantiate()
+	g2.save_path = g.save.path; g2.skip_select = true
+	root.add_child(g2)
+	check(g2.distance == "mid", "new session restores last distance (中程)")
+	root.remove_child(g2); g2.free()
+	g.set_distance("short"); g.set_level(0)
+	g.save.clear_all(); g.save.save_file()
 
 func results_tests(g) -> void:
 	print("results / level select")
@@ -556,20 +677,26 @@ func results_tests(g) -> void:
 	g.choose_level(0)
 	check(g.state == g.State.READY and g.level_index == 0, "choosing level 1 goes to ready")
 	g.start_run()
-	while g.correct < 20:
+	while g.correct < int(g.lvl.target_correct):
 		_answer(g, "correct")
 	g._tick(0.0)
 	check(g.state == g.State.CLEARED and g.results_box.visible, "results panel shown on clear")
+	check(g.lbl_result.text.contains("小知識") and g.lbl_result.text.contains("獲得點數 +"), "results show knowledge + points")
 	check(g.btn_next.visible and not g.btn_next.disabled and g.btn_select.visible, "「下一關」enabled after clearing level 1")
-	check(g.save.get_record("level_01").cleared, "clear saved")
+	check(g.save.get_record("1-1", g.distance).cleared, "clear saved")
 	g.btn_next.pressed.emit()
 	check(g.level_index == 1 and g.state == g.State.READY, "「下一關」goes to level 2")
+	g.set_level(g.levels.size() - 1); g.reset_run()
 	g.start_run()
 	g.elapsed = 999.0
 	g._tick(0.0)
 	check(g.state == g.State.FAILED and g.results_box.visible and g.btn_next.visible == false, "last level: no 「下一關」")
 	g.btn_select.pressed.emit()
-	check(g.state == g.State.SELECT and not g.level_buttons[1].disabled, "「回選關」returns; level 2 now open")
+	check(g.state == g.State.SELECT and not g.level_buttons[1].disabled, "「回選關」returns; 1-2 now open")
+	check(g.level_buttons.size() == 21 and g.btn_tab_hira.button_pressed, "平假名 tab lists 21 stages")
+	g.btn_tab_kata.pressed.emit()
+	check(g.level_buttons.size() == 12 and g.level_buttons[0].disabled and g.level_buttons[0].text.contains("鎖定"), "片假名 tab lists 12 stages, locked at start")
+	g.btn_tab_hira.pressed.emit()
 	g.set_level(0)
 
 func layout_check(g, sz: Vector2i) -> void:
@@ -581,7 +708,7 @@ func layout_check(g, sz: Vector2i) -> void:
 	var bad := []
 	for item in [["hint", g.lbl_hint], ["notice", g.lbl_notice], ["float", g.lbl_float], ["center", g.lbl_center],
 			["results", g.results_box.get_child(0)], ["select", g.select_box.get_child(0)], ["pause", g.pause_box.get_child(0)], ["settings", g.settings_box.get_child(0)],
-			["speed", g.lbl_speed], ["combo", g.lbl_combo]]:
+			["speed", g.lbl_speed], ["combo", g.lbl_combo], ["boss", g.lbl_boss]]:
 		var rc: Rect2 = item[1].get_global_rect()
 		if absf(rc.get_center().x - cx) > 2.0:
 			centered = false; bad.append(item[0])
@@ -597,7 +724,10 @@ func layout_check(g, sz: Vector2i) -> void:
 	var p: Rect2 = g.btn_pause.get_global_rect(); var v: Rect2 = g.btn_voice.get_global_rect()
 	check(a.get_center().x > vr.size.x * 0.5 and a.end.y > vr.size.y * 0.75 and b.get_center().x < vr.size.x * 0.5 and b.end.y > vr.size.y * 0.75, "%s: 加速 bottom-right, 煞車 bottom-left" % tag)
 	var h: Rect2 = g.hearts_box.get_global_rect()
-	check(h.get_center().x < vr.size.x * 0.5 and not h.intersects(p) and not h.intersects(v) and not h.intersects(g.lbl_time.get_global_rect()) and not h.intersects(g.lbl_count.get_global_rect()), "%s: hearts top-left, clear of time/count/pause %s t%s c%s p%s" % [tag, str(h), str(g.lbl_time.get_global_rect()), str(g.lbl_count.get_global_rect()), str(p)])
+	check(h.get_center().x < vr.size.x * 0.5 and not h.intersects(p) and not h.intersects(v) and not h.intersects(g.lbl_time.get_global_rect()) and not h.intersects(g.lbl_count.get_global_rect()), "%s: HP bar top-left, clear of time/count/pause %s t%s c%s p%s" % [tag, str(h), str(g.lbl_time.get_global_rect()), str(g.lbl_count.get_global_rect()), str(p)])
+	var sc: Rect2 = g.select_scroll.get_global_rect()
+	var inner: Control = g.select_scroll.get_child(0)
+	check(sc.position.y >= -1 and sc.end.y <= vr.size.y + 1 and inner.size.y > sc.size.y, "%s: level list scrolls inside the screen (list %.0f > view %.0f)" % [tag, inner.size.y, sc.size.y])
 	var lk: Rect2 = g.btn_lock.get_global_rect()
 	var mn := minf(vr.size.x, vr.size.y)
 	check(a.size.x >= mn * 0.27 and b.size.x >= mn * 0.23 and p.size.x >= mn * 0.12, "%s: touch buttons scale with short side (加速 %.0f of %.0f)" % [tag, a.size.x, mn])
@@ -608,20 +738,22 @@ func layout_check(g, sz: Vector2i) -> void:
 func _layout_prepare(g) -> void:
 	g.set_level(0); g.reset_run()
 	g.lbl_hint.text = "ka"; g._notice("聽音模式"); g.lbl_float.text = "○"; g.lbl_combo.text = "20 連擊"
-	g.lbl_result.text = "CLEAR!\n★★★\n\nTime 31.30 s\n(run 31.30 + penalty 0.0)\nwrong 0   miss 0\nbest combo 20\n新紀錄！"
+	g.lbl_result.text = "CLEAR!  ★★★\n1-BOSS あ・か・さ行綜合  長程\n小知識：%s\n" % g.levels[3].knowledge + "CLEAR!\n★★★\n\nTime 31.30 s\n(run 31.30 + penalty 0.0)\nwrong 0   miss 0\nbest combo 20\n新紀錄！"
 	g.results_box.visible = true
 	g.show_select()
+	g.lbl_boss.text = "護盾 連續答對 1 / 2"; g.lbl_boss.visible = true
 	g.results_box.visible = true
 	g.pause_box.visible = true
 	g.settings_box.visible = true
 	g.btn_lock.visible = true
 
 var total_frames := 0
+var _relayout := true
 
 func _process(_delta: float) -> bool:
 	frames += 1
 	total_frames += 1
-	if total_frames > 60 * 400 or (reg_game != null and not reg_game.has_method("reset_run")):
+	if total_frames > 60 * 900 or (reg_game != null and not reg_game.has_method("reset_run")):
 		printerr("ABORT: game script failed to load or test ran too long")
 		quit(2)
 		return true
@@ -629,6 +761,7 @@ func _process(_delta: float) -> bool:
 		regression_tests()
 		level_tests(reg_game)
 		save_tests()
+		distance_tests(reg_game)
 		results_tests(reg_game)
 		print("layout")
 		_layout_prepare(reg_game)
@@ -638,6 +771,11 @@ func _process(_delta: float) -> bool:
 		return false
 	if phase == "layout":
 		layout_wait += 1
+		if layout_wait == 2 and _relayout:
+			_layout_prepare(reg_game)   # rebuild the level list for the new canvas size
+			_relayout = false
+			layout_wait = 0
+			return false
 		if layout_wait < 3:
 			return false
 		layout_check(reg_game, SIZES[layout_i])
@@ -645,6 +783,7 @@ func _process(_delta: float) -> bool:
 		layout_wait = 0
 		if layout_i < SIZES.size():
 			root.size = SIZES[layout_i]
+			_relayout = true
 			return false
 		root.size = Vector2i(720, 1280)
 		root.remove_child(reg_game)
@@ -660,12 +799,14 @@ func _process(_delta: float) -> bool:
 	if frames < 3:
 		return false
 	if game.state == game.State.CLEARED or game.state == game.State.FAILED or frames > 60 * 120:
-		var n := "%d (%s)" % [auto_level + 1, game.speed_mode]
-		var tgt := 20 if auto_level == 0 else 30
+		var n := "%s (%s)" % [game.level_id, game.speed_mode]
+		var tgt: int = int(game.lvl.target_correct) + game.shields_broken * game.break_chain
 		check(game.state == game.State.CLEARED, "autopilot clears level %s (clock %.2f s, stars %d, correct %d, wrong %d, miss %d)" % [n, game.clock(), Rules.stars_for(game.clock(), game.lvl), game.correct, game.wrong, game.missed])
 		check(game.wrong == 0 and game.missed == 0, "autopilot L%s makes no mistakes" % n)
-		check(game.logger.entries.size() == tgt, "dev logger recorded %d questions" % tgt)
-		check(FileAccess.file_exists("user://timing/runs_v3.csv"), "timing CSV written")
+		check(game.logger.entries.size() == tgt, "dev logger recorded %d questions (incl. %d shield-break answers)" % [tgt, game.shields_broken * game.break_chain])
+		if game.shield_thresholds.size() > 0:
+			check(game.shields_broken == game.shield_thresholds.size(), "autopilot broke both boss shields")
+		check(FileAccess.file_exists(DevLogger.RUNS_FILE), "timing CSV written")
 		if game.speed_mode != AUTO_RUNS[auto_i][1]:
 			check(false, "autopilot mode forced")
 		if auto_i + 1 < AUTO_RUNS.size():
