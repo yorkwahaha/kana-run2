@@ -1,5 +1,7 @@
 # Kana Run 2.0 — 試玩版（33 關）
 
+🌐 **線上免安裝立即試玩**：[https://yorkwahaha.github.io/kana-run2/](https://yorkwahaha.github.io/kana-run2/)
+
 Godot **4.7.2**（`I:\Projects\Godot_v4.7.2`），**Mobile** 渲染器（Web 匯出時自動改用 Compatibility）。
 舊專案 `I:\Projects\Kana Run` 是凍結的 1.0 Beta，**不要修改**；本專案只從那裡複製了素材。
 
