@@ -2,3 +2,5 @@
 build/
 *.tmp
 __pycache__/
+scratch/
+art_backup_v1/

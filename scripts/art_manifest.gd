@@ -10,9 +10,13 @@ const TABLET_SHIELD := preload("res://art/tablet/tablet_shield_overlay.png")
 const TABLET_SHATTER := preload("res://art/tablet/tablet_shatter.png")
 const FONT_KANA := preload("res://art/fonts/kana_main.ttf")
 const ICON := preload("res://art/icon/icon_512.png")
+const PIXEL_SHADOW := preload("res://art/runner/pixel_shadow.png")
 const PROPS := {
 	"house_a": preload("res://art/stage/props/house_a.png"),
 	"house_b": preload("res://art/stage/props/house_b.png"),
+	"house_l_record": preload("res://art/stage/props/house_l_record.png"),
+	"house_r_109": preload("res://art/stage/props/house_r_109.png"),
+	"house_r_karaoke": preload("res://art/stage/props/house_r_karaoke.png"),
 	"shop": preload("res://art/stage/props/shop.png"),
 	"wall": preload("res://art/stage/props/wall.png"),
 	"sakura_big": preload("res://art/stage/props/sakura_big.png"),
@@ -23,8 +27,11 @@ const PROPS := {
 	"lamp": preload("res://art/stage/props/lamp.png"),
 	"vending": preload("res://art/stage/props/vending.png"),
 	"fence": preload("res://art/stage/props/fence.png"),
+	"house_l_cyber": preload("res://art/stage/props/house_l_cyber.png"),
+	"house_r_tower": preload("res://art/stage/props/house_r_tower.png"),
+	"cyber_hologram": preload("res://art/stage/props/cyber_hologram.png"),
 }
-const PROP_SIZE := {"house_a": [611, 640], "house_b": [640, 601], "shop": [640, 566], "wall": [640, 218], "sakura_big": [640, 640], "sakura_small": [468, 640], "bench": [512, 202], "planter": [512, 192], "shrub": [512, 383], "lamp": [52, 512], "vending": [272, 512], "fence": [512, 158]}
+const PROP_SIZE := {"house_a": [534, 720], "shop": [502, 720], "house_l_record": [483, 720], "house_b": [457, 720], "house_r_karaoke": [351, 720], "house_r_109": [364, 720], "house_l_cyber": [489, 720], "house_r_tower": [558, 720], "cyber_hologram": [320, 512], "wall": [640, 218], "sakura_big": [640, 640], "sakura_small": [468, 640], "bench": [512, 202], "planter": [512, 192], "shrub": [512, 383], "lamp": [52, 512], "vending": [272, 512], "fence": [512, 158]}
 const SHIELD := {
 	"appear": preload("res://art/vfx/boss_shield_appear.png"),
 	"loop": preload("res://art/vfx/boss_shield_loop.png"),
@@ -94,6 +101,10 @@ const UI := {
 	"icon_timer": preload("res://art/ui/icon_timer.png"),
 	"judge_ng": preload("res://art/ui/judge_ng.png"),
 	"judge_ok": preload("res://art/ui/judge_ok.png"),
+	"mode_race_active": preload("res://art/ui/mode_race_active.png"),
+	"mode_race_inactive": preload("res://art/ui/mode_race_inactive.png"),
+	"mode_step_active": preload("res://art/ui/mode_step_active.png"),
+	"mode_step_inactive": preload("res://art/ui/mode_step_inactive.png"),
 	"panel_9slice": preload("res://art/ui/panel_9slice.png"),
 	"result_bg": preload("res://art/ui/result_bg.png"),
 	"review_card": preload("res://art/ui/review_card.png"),
@@ -137,4 +148,4 @@ const RUNNER_TEX := {
 	"lane_right": preload("res://art/runner/lane_right.png"),
 	"run": preload("res://art/runner/run.png"),
 }
-const RUNNER := {"accel": {"fw": 270, "fh": 405, "frames": 8, "cols": 8, "rows": 1, "fps": 12, "loop": true, "ax": 135.0, "ay": 399.0}, "brake": {"fw": 270, "fh": 405, "frames": 13, "cols": 8, "rows": 2, "fps": 12, "loop": false, "ax": 135.0, "ay": 399.0, "return_frame": 9}, "hit_correct": {"fw": 330, "fh": 420, "frames": 15, "cols": 8, "rows": 2, "fps": 12, "loop": false, "ax": 165.0, "ay": 414.0, "return_frame": 0}, "hit_shield": {"fw": 270, "fh": 405, "frames": 17, "cols": 8, "rows": 3, "fps": 12, "loop": false, "ax": 135.0, "ay": 399.0, "return_frame": 11}, "hit_wrong": {"fw": 330, "fh": 420, "frames": 9, "cols": 8, "rows": 2, "fps": 24, "loop": false, "ax": 165.0, "ay": 414.0, "return_frame": 10}, "idle": {"fw": 270, "fh": 405, "frames": 10, "cols": 8, "rows": 2, "fps": 12, "loop": true, "ax": 135.0, "ay": 399.0}, "lane_left": {"fw": 270, "fh": 405, "frames": 14, "cols": 8, "rows": 2, "fps": 12, "loop": false, "ax": 135.0, "ay": 399.0, "return_frame": 4}, "lane_right": {"fw": 270, "fh": 405, "frames": 15, "cols": 8, "rows": 2, "fps": 12, "loop": false, "ax": 135.0, "ay": 399.0, "return_frame": 9}, "run": {"fw": 270, "fh": 405, "frames": 12, "cols": 8, "rows": 2, "fps": 12, "loop": true, "ax": 135.0, "ay": 399.0}}
+const RUNNER := {"accel": {"fw": 270, "fh": 405, "frames": 8, "cols": 8, "rows": 1, "fps": 12, "loop": true, "ax": 135.0, "ay": 399.0}, "brake": {"fw": 270, "fh": 405, "frames": 13, "cols": 8, "rows": 2, "fps": 12, "loop": false, "ax": 135.0, "ay": 399.0, "return_frame": 9}, "hit_correct": {"fw": 330, "fh": 420, "frames": 15, "cols": 8, "rows": 2, "fps": 20, "loop": false, "ax": 165.0, "ay": 414.0, "return_frame": 0}, "hit_shield": {"fw": 270, "fh": 405, "frames": 17, "cols": 8, "rows": 3, "fps": 12, "loop": false, "ax": 135.0, "ay": 399.0, "return_frame": 11}, "hit_wrong": {"fw": 330, "fh": 420, "frames": 9, "cols": 8, "rows": 2, "fps": 24, "loop": false, "ax": 165.0, "ay": 414.0, "return_frame": 10}, "idle": {"fw": 270, "fh": 405, "frames": 10, "cols": 8, "rows": 2, "fps": 12, "loop": true, "ax": 135.0, "ay": 399.0}, "lane_left": {"fw": 270, "fh": 405, "frames": 14, "cols": 8, "rows": 2, "fps": 12, "loop": false, "ax": 135.0, "ay": 399.0, "return_frame": 4}, "lane_right": {"fw": 270, "fh": 405, "frames": 15, "cols": 8, "rows": 2, "fps": 12, "loop": false, "ax": 135.0, "ay": 399.0, "return_frame": 9}, "run": {"fw": 270, "fh": 405, "frames": 8, "cols": 8, "rows": 1, "fps": 12, "loop": true, "ax": 135.0, "ay": 399.0}}

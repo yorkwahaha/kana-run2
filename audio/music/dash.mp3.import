@@ -12,7 +12,7 @@ dest_files=["res://.godot/imported/dash.mp3-28feda6d0d25fc17c24762c27f2196bc.mp3
 
 [params]
 
-loop=false
+loop=true
 loop_offset=0
 bpm=0
 beat_count=0

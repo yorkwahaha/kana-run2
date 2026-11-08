@@ -116,10 +116,21 @@ const SFX := {
 	"shift": preload("res://audio/sfx/shift.mp3"),
 	"tap": preload("res://audio/sfx/tap.mp3"),
 	"back": preload("res://audio/sfx/back.mp3"),
+	"star": preload("res://audio/sfx/star.mp3"),
+	"focus": preload("res://audio/sfx/focus.mp3"),
+	"tab": preload("res://audio/sfx/tab.mp3"),
+	"heal": preload("res://audio/sfx/heal.mp3"),
 }
 
 const MUSIC := {
 	"res://audio/music/dash.mp3": preload("res://audio/music/dash.mp3"),
+	"res://audio/music/hit.mp3": preload("res://audio/music/hit.mp3"),
+	"res://audio/music/hosi.mp3": preload("res://audio/music/hosi.mp3"),
+	"res://audio/music/ryu.mp3": preload("res://audio/music/ryu.mp3"),
+	"dash": preload("res://audio/music/dash.mp3"),
+	"hit": preload("res://audio/music/hit.mp3"),
+	"hosi": preload("res://audio/music/hosi.mp3"),
+	"ryu": preload("res://audio/music/ryu.mp3"),
 }
 
 const FONT_KANA := preload("res://assets/fonts/bold.ttf")
@@ -127,4 +138,5 @@ const FONT_UI := preload("res://assets/fonts/ui.ttf")
 ## Noto Sans TC (OFL) subset, weight 800: ASCII + kana + HUD Chinese (聽音模式, 連擊 ...).
 ## The copied 1.0 subset fonts lack 模. Regenerate with tools/make_hud_font.py.
 const FONT_HUD := preload("res://assets/fonts/hud_cjk.ttf")
+const FONT_HUD_SC := preload("res://assets/fonts/hud_sc.ttf")
 const CONFIG_JSON := preload("res://config/game_config.json")

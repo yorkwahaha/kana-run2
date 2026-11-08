@@ -5,7 +5,7 @@ import sys
 from fontTools.ttLib import TTFont
 from fontTools.varLib import instancer
 from fontTools import subset
-EXTRA = "暫停繼續重來重播加速煞車下一關回選鎖定新紀錄＋聽音模式連擊提示答對撞錯漏題過關失敗時間重玩加速煞車換線開始羅馬拼音星秒第一關行★☆○×・ー、。！？：（）「」"
+EXTRA = "暫停繼續重來重播加速煞車下一關回選鎖定新紀錄＋聽音模式連擊提示答對撞錯漏題過關失敗時間重玩加速煞車換線開始羅馬拼音星秒第一關行★☆○×・ー、。！？：（）「」音樂音效語音音量評價等級完美評級"
 f = instancer.instantiateVariableFont(TTFont(sys.argv[1]), {"wght": 800})
 import glob, pathlib
 # also every non-ASCII character used in scripts / config, so new HUD text never shows as tofu

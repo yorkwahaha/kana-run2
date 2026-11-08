@@ -46,6 +46,8 @@ func set_mode(m: String) -> void:
 func toggle_lock() -> void:
 	if mode != "race":
 		return
+	if not locked and kmh() < 5.0:
+		return
 	locked = not locked
 	lock_speed = speed
 

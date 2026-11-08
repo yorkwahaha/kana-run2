@@ -71,6 +71,14 @@ static func make_row_with_target(pool: Array, target: String, avoid_lane: int, r
 static func hint_visible(seen_before: int, first_n: int, progress: float, ratio: float) -> bool:
 	return seen_before < first_n and progress < ratio
 
+## Draw randomly among the least-used kana; each pool keeps its own rotation.
+static func balanced_target(pool: Array, draws: Dictionary, previous: String, rng: RandomNumberGenerator) -> String:
+	var fewest: int = pool.map(func(k): return draws.get(k, 0)).min()
+	var candidates := pool.filter(func(k): return draws.get(k, 0) == fewest)
+	if candidates.size() > 1:
+		candidates.erase(previous)
+	return candidates[rng.randi_range(0, candidates.size() - 1)]
+
 ## Removes from a distractor list everything that sounds like the target or is the target.
 static func filter_same_sound(others: Array, target: String, same_sound: Array) -> Array:
 	var bad := [target]
@@ -95,13 +103,12 @@ static func make_row_ex(pool: Array, target: String, prev_target: String, avoid_
 	var look: Array = filter_same_sound(lookalikes.get(target, []), target, same_sound).filter(
 		func(k): return others.has(k) or extra_pool.has(k))
 	var picks: Array = []
-	for k in look:
-		if picks.size() < mini(1, lanes - 1):   # at most one lookalike trap per row
-			picks.append(k)
+	if not look.is_empty() and lanes > 1:
+		picks.append(look[rng.randi_range(0, look.size() - 1)])
 	for k in others:
 		if picks.size() >= lanes - 1:
 			break
-		if not picks.has(k):
+		if filter_same_sound(picks, k, same_sound).size() == picks.size():
 			picks.append(k)
 	var n := picks.size() + 1
 	var allowed: Array = []

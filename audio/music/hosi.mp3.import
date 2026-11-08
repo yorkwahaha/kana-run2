@@ -12,7 +12,7 @@ dest_files=["res://.godot/imported/hosi.mp3-9d3f9b0e30cbae86690b9d70e0028b3b.mp3
 
 [params]
 
-loop=false
+loop=true
 loop_offset=0
 bpm=0
 beat_count=0

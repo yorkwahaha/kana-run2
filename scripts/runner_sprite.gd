@@ -35,6 +35,17 @@ func _init() -> void:
 func def(n := "") -> Dictionary:
 	return Art.RUNNER[n if n != "" else anim]
 
+func set_aura(col: Color, strength: float, rim_col := Color.WHITE, rim_str := 0.0) -> void:
+	if _mat != null:
+		_mat.set_shader_parameter("aura_color", col)
+		_mat.set_shader_parameter("aura_strength", strength)
+		_mat.set_shader_parameter("rim_color", rim_col)
+		_mat.set_shader_parameter("rim_strength", rim_str)
+
+func set_opacity(op: float) -> void:
+	if _mat != null:
+		_mat.set_shader_parameter("opacity", op)
+
 func _apply(n: String, f: int) -> void:
 	var d: Dictionary = Art.RUNNER[n]
 	anim = n
@@ -74,23 +85,28 @@ func play_once(n: String, cut_tail := 0, hold_last := false) -> void:
 		"hit_shield": flash = 0.25; _flash_decay = 0.25 / 0.25
 	_mat.set_shader_parameter("flash", flash)
 
-func release_hold() -> void:
+func release_hold(next_anim := "run") -> void:
 	if _once and _hold_last:
-		_finish_once()
+		_finish_once(next_anim)
 
 func is_one_shot() -> bool:
 	return _once
 
-func _finish_once() -> void:
+func _finish_once(next_anim := "run") -> void:
 	_once = false
 	_hold_last = false
 	_t = 0.0
-	_apply("run", _return_frame)
+	_apply(next_anim, posmod(_return_frame, int(Art.RUNNER.run.frames)) if next_anim == "run" else 0)
 
-func tick(dt: float) -> void:
+func tick(dt: float, speed_kmh := -1.0) -> void:
 	var d: Dictionary = Art.RUNNER[anim]
 	_t += dt
-	var step := 1.0 / float(d.fps)
+	var fps := float(d.fps)
+	if (anim == "run" or anim == "accel") and speed_kmh >= 0.0:
+		# Footstep matching: slow stride at low speed, powerful sprint at high speed
+		var scale_factor := clampf(lerpf(0.50, 1.35, (speed_kmh - 5.0) / 55.0), 0.45, 1.45)
+		fps *= scale_factor
+	var step := 1.0 / fps
 	while _t >= step:
 		_t -= step
 		var last := int(d.frames) - 1 - (_cut_tail if _once else 0)
