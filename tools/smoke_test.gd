@@ -1867,7 +1867,7 @@ func cyber_polish_tests(g) -> void:
 	check(g.Art.PROPS.has("cyber_hologram"), "Art.PROPS contains cyber_hologram")
 	check(g.MID_PROPS_L.has("house_l_cyber"), "MID_PROPS_L includes house_l_cyber")
 	check(g.MID_PROPS_R.has("house_r_tower"), "MID_PROPS_R includes house_r_tower")
-	check(g.NEAR_PROPS_L.has("cyber_hologram"), "NEAR_PROPS_L includes cyber_hologram")
+	check(!g.NEAR_PROPS_L.has("cyber_hologram") and g.NEAR_PROPS_L.has("vending"), "NEAR_PROPS_L excludes opaque cyber_hologram")
 	check(g.NEAR_PROPS_L.has("bench"), "NEAR_PROPS_L includes bench")
 	check(g.NEAR_PROPS_L.has("shrub"), "NEAR_PROPS_L includes shrub")
 

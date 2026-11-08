@@ -440,12 +440,12 @@ func get_player_rank() -> Dictionary:
 	var streak := int(get_daily().get("streak", 0))
 
 	if stars >= 80 or (stars >= 50 and endless_pts >= 4000) or streak >= 30:
-		return {"tier": 5, "title": "賽博假名武神", "badge": "👑 武神", "color": Color(1.0, 0.85, 0.2), "desc": "達到全五十音神速反射境界"}
+		return {"tier": 5, "title": "賽博假名武神", "badge": "★ 武神", "color": Color(1.0, 0.85, 0.2), "desc": "達到全五十音神速反射境界"}
 	elif stars >= 55 or endless_pts >= 2200 or streak >= 14:
-		return {"tier": 4, "title": "音速破碑者", "badge": "💎 音速", "color": Color(0.35, 0.95, 1.0), "desc": "超越音障，石碑應聲粉碎"}
+		return {"tier": 4, "title": "音速破碑者", "badge": "◆ 音速", "color": Color(0.35, 0.95, 1.0), "desc": "超越音障，石碑應聲粉碎"}
 	elif stars >= 30 or endless_pts >= 1000 or streak >= 7:
-		return {"tier": 3, "title": "澀谷極速客", "badge": "🥇 極速", "color": Color(0.9, 0.4, 1.0), "desc": "縱橫澀谷夜城的疾走高手"}
+		return {"tier": 3, "title": "澀谷極速客", "badge": "▲ 極速", "color": Color(0.9, 0.4, 1.0), "desc": "縱橫澀谷夜城的疾走高手"}
 	elif stars >= 12 or endless_pts >= 400 or streak >= 3:
-		return {"tier": 2, "title": "霓虹巡航者", "badge": "🥈 巡航", "color": Color(0.3, 0.85, 0.6), "desc": "熟練駕馭假名賽道的街頭新星"}
+		return {"tier": 2, "title": "霓虹巡航者", "badge": "● 巡航", "color": Color(0.3, 0.85, 0.6), "desc": "熟練駕馭假名賽道的街頭新星"}
 	else:
-		return {"tier": 1, "title": "街頭新手", "badge": "🥉 新手", "color": Color(0.7, 0.75, 0.85), "desc": "初入澀谷賽博賽道的挑戰者"}
+		return {"tier": 1, "title": "街頭新手", "badge": "■ 新手", "color": Color(0.7, 0.75, 0.85), "desc": "初入澀谷賽博賽道的挑戰者"}

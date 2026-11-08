@@ -581,6 +581,25 @@ var btn_select: Button
 var result_body: BoxContainer
 var result_actions: GridContainer
 var btn_review: Button
+var res_chip_stage: Label
+var res_header_row: HBoxContainer
+var res_cards_grid: GridContainer
+var res_card_time: PanelContainer
+var lbl_card_time_val: Label
+var lbl_card_time_sub: Label
+var res_card_acc: PanelContainer
+var lbl_card_acc_val: Label
+var lbl_card_acc_sub: Label
+var res_card_combo: PanelContainer
+var lbl_card_combo_val: Label
+var lbl_card_combo_sub: Label
+var res_card_pts: PanelContainer
+var lbl_card_pts_val: Label
+var lbl_card_pts_sub: Label
+var res_weak_box: PanelContainer
+var res_weak_tiles: HFlowContainer
+var res_knowledge_box: PanelContainer
+var lbl_res_knowledge: Label
 var review_items := {}
 var review_index := 0
 var review_attempts := 0
@@ -863,8 +882,8 @@ func _build_world() -> void:
 ## to prevent perspective inversion and guarantee authentic Shibuya commercial streetscape.
 const MID_PROPS_L := ["house_a", "shop", "house_l_record", "house_l_cyber"]
 const MID_PROPS_R := ["house_b", "house_r_karaoke", "house_r_109", "house_r_tower"]
-const NEAR_PROPS_L := ["vending", "lamp", "fence", "planter", "bench", "shrub", "cyber_hologram"]
-const NEAR_PROPS_R := ["vending", "lamp", "fence", "planter", "bench", "shrub", "cyber_hologram"]
+const NEAR_PROPS_L := ["vending", "lamp", "fence", "planter", "bench", "shrub"]
+const NEAR_PROPS_R := ["vending", "lamp", "fence", "planter", "bench", "shrub"]
 const FAR_PROPS_L := ["house_l_record", "house_a", "shop", "house_l_cyber"]
 const FAR_PROPS_R := ["house_r_109", "house_r_karaoke", "house_b", "house_r_tower"]
 const PROP_H := {"house_a": 8.0, "house_b": 8.0, "house_r_karaoke": 8.0, "house_r_109": 8.0, "house_l_record": 8.0, "house_l_cyber": 8.0, "house_r_tower": 8.5, "shop": 7.5, "wall": 2.2, "sakura_big": 6.0, "sakura_small": 4.6,
@@ -1493,89 +1512,226 @@ func _result_label(text: String, font_size: int) -> Label:
 	_ink(label)
 	return label
 
+func _make_cyber_stat_card(title_text: String, icon_accent: Color) -> Array:
+	var pc := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.04, 0.05, 0.12, 0.90)
+	sb.border_width_left = 2; sb.border_width_top = 2; sb.border_width_right = 2; sb.border_width_bottom = 2
+	sb.border_color = icon_accent * 0.75
+	sb.set_corner_radius_all(10)
+	sb.set_content_margin_all(8)
+	pc.add_theme_stylebox_override("panel", sb)
+
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 2)
+	pc.add_child(vb)
+
+	var title := Label.new()
+	title.text = title_text
+	title.add_theme_font_override("font", Assets.FONT_HUD)
+	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_color_override("font_color", icon_accent)
+	vb.add_child(title)
+
+	var val := Label.new()
+	val.add_theme_font_override("font", Assets.FONT_HUD)
+	val.add_theme_font_size_override("font_size", 26)
+	val.add_theme_color_override("font_color", Color.WHITE)
+	vb.add_child(val)
+
+	var sub := Label.new()
+	sub.add_theme_font_override("font", Assets.FONT_HUD)
+	sub.add_theme_font_size_override("font_size", 13)
+	sub.add_theme_color_override("font_color", Color(0.72, 0.78, 0.88))
+	vb.add_child(sub)
+
+	return [pc, val, sub]
+
 func _build_results() -> void:
 	var r := _panel_center()
 	results_box = r[0]
+	var res_root: VBoxContainer = r[1]
+	res_root.add_theme_constant_override("separation", 8)
+
+	# 1. Top Stage Chip & Stars Bar
+	var top_hbox := HBoxContainer.new()
+	top_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	top_hbox.add_theme_constant_override("separation", 16)
+	res_root.add_child(top_hbox)
+
+	res_chip_stage = Label.new()
+	res_chip_stage.add_theme_font_override("font", Assets.FONT_HUD)
+	res_chip_stage.add_theme_font_size_override("font_size", 18)
+	res_chip_stage.add_theme_color_override("font_color", Color(0.3, 0.9, 1.0))
+	var chip_sb := StyleBoxFlat.new()
+	chip_sb.bg_color = Color(0.08, 0.12, 0.22, 0.80)
+	chip_sb.border_width_left = 1; chip_sb.border_width_top = 1; chip_sb.border_width_right = 1; chip_sb.border_width_bottom = 1
+	chip_sb.border_color = Color(0.2, 0.8, 1.0, 0.5)
+	chip_sb.set_corner_radius_all(8)
+	chip_sb.set_content_margin_all(6)
+	res_chip_stage.add_theme_stylebox_override("normal", chip_sb)
+	top_hbox.add_child(res_chip_stage)
+
 	res_stars = HBoxContainer.new()
 	res_stars.alignment = BoxContainer.ALIGNMENT_CENTER
 	res_stars.add_theme_constant_override("separation", 6)
-	r[1].add_child(res_stars)
+	top_hbox.add_child(res_stars)
 	for i in 3:
 		var stx := TextureRect.new()
 		stx.texture = Art.UI.star_empty_200
 		stx.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		stx.custom_minimum_size = Vector2(128, 128)
+		stx.custom_minimum_size = Vector2(44, 44)
 		res_stars.add_child(stx)
-	lbl_result_heading = _result_label("", 72)
-	r[1].add_child(lbl_result_heading)
+
+	# 2. Main Title Row: Heading + Rank Box + New Record Badge
+	res_header_row = HBoxContainer.new()
+	res_header_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	res_header_row.add_theme_constant_override("separation", 18)
+	res_root.add_child(res_header_row)
+
+	lbl_result_heading = Label.new()
+	lbl_result_heading.text = ""
+	lbl_result_heading.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_result_heading.add_theme_font_size_override("font_size", 48)
+	lbl_result_heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_result_heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl_result_heading.autowrap_mode = TextServer.AUTOWRAP_OFF
+	lbl_result_heading.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_ink(lbl_result_heading)
+	res_header_row.add_child(lbl_result_heading)
 
 	rank_box = PanelContainer.new()
 	var rank_style := StyleBoxFlat.new()
 	rank_style.bg_color = Color(0.06, 0.05, 0.16, 0.94)
-	rank_style.border_width_left = 3
-	rank_style.border_width_top = 3
-	rank_style.border_width_right = 3
-	rank_style.border_width_bottom = 3
+	rank_style.border_width_left = 2; rank_style.border_width_top = 2; rank_style.border_width_right = 2; rank_style.border_width_bottom = 2
 	rank_style.border_color = Color(0.18, 0.88, 1.0)
-	rank_style.corner_radius_top_left = 14
-	rank_style.corner_radius_top_right = 14
-	rank_style.corner_radius_bottom_left = 14
-	rank_style.corner_radius_bottom_right = 14
-	rank_style.set_content_margin_all(8)
+	rank_style.set_corner_radius_all(10)
+	rank_style.set_content_margin_all(6)
 	rank_box.add_theme_stylebox_override("panel", rank_style)
-	rank_box.custom_minimum_size = Vector2(170, 100)
-	rank_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	rank_box.custom_minimum_size = Vector2(100, 48)
+	rank_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 
-	var rk_vb := VBoxContainer.new()
+	var rk_vb := HBoxContainer.new()
 	rk_vb.alignment = BoxContainer.ALIGNMENT_CENTER
-	rk_vb.add_theme_constant_override("separation", 2)
+	rk_vb.add_theme_constant_override("separation", 6)
 	rank_box.add_child(rk_vb)
 
 	var lbl_rk_title := Label.new()
 	lbl_rk_title.text = "評級"
 	lbl_rk_title.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_rk_title.add_theme_font_size_override("font_size", 24)
-	lbl_rk_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_rk_title.add_theme_font_size_override("font_size", 16)
 	lbl_rk_title.add_theme_color_override("font_color", Color(0.7, 0.88, 1.0))
 	rk_vb.add_child(lbl_rk_title)
 
 	lbl_rank = Label.new()
 	lbl_rank.text = "S"
 	lbl_rank.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_rank.add_theme_font_size_override("font_size", 62)
+	lbl_rank.add_theme_font_size_override("font_size", 30)
 	lbl_rank.add_theme_color_override("font_outline_color", Color(0.04, 0.03, 0.08, 0.95))
-	lbl_rank.add_theme_constant_override("outline_size", 8)
+	lbl_rank.add_theme_constant_override("outline_size", 6)
 	lbl_rank.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rk_vb.add_child(lbl_rank)
 
-	r[1].add_child(rank_box)
+	res_header_row.add_child(rank_box)
 
 	res_badge = TextureRect.new()
 	res_badge.texture = Art.UI.badge_new_record
-	res_badge.custom_minimum_size = Vector2(180, 70)
-	res_badge.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	res_badge.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	res_badge.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	res_badge.custom_minimum_size = Vector2(120, 48)
+	res_badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var nl := Label.new(); nl.text = "新紀錄"
-	nl.add_theme_font_override("font", Assets.FONT_HUD); nl.add_theme_font_size_override("font_size", 34)
+	nl.add_theme_font_override("font", Assets.FONT_HUD); nl.add_theme_font_size_override("font_size", 20)
 	nl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; nl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_ink(nl)
 	res_badge.add_child(nl); _place_px(nl, 0, 0, 1, 0.95, 0, 0, 0, 0)
-	r[1].add_child(res_badge)
-	result_body = BoxContainer.new()
-	result_body.alignment = BoxContainer.ALIGNMENT_CENTER
-	result_body.add_theme_constant_override("separation", 28)
-	r[1].add_child(result_body)
-	lbl_result = _result_label("", 44)
-	lbl_result.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	lbl_result.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	result_body.add_child(lbl_result)
+	res_header_row.add_child(res_badge)
+
+	# 3. 4-Card Metrics Grid
+	res_cards_grid = GridContainer.new()
+	res_cards_grid.columns = 2
+	res_cards_grid.add_theme_constant_override("h_separation", 10)
+	res_cards_grid.add_theme_constant_override("v_separation", 8)
+	res_cards_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	res_root.add_child(res_cards_grid)
+
+	var c_time := _make_cyber_stat_card("◎ 結算用時", Color(0.2, 0.85, 1.0))
+	res_card_time = c_time[0]; lbl_card_time_val = c_time[1]; lbl_card_time_sub = c_time[2]
+	res_cards_grid.add_child(res_card_time)
+
+	var c_acc := _make_cyber_stat_card("★ 命中答對", Color(0.3, 0.95, 0.6))
+	res_card_acc = c_acc[0]; lbl_card_acc_val = c_acc[1]; lbl_card_acc_sub = c_acc[2]
+	res_cards_grid.add_child(res_card_acc)
+
+	var c_combo := _make_cyber_stat_card("▲ 疾走表現", Color(1.0, 0.75, 0.2))
+	res_card_combo = c_combo[0]; lbl_card_combo_val = c_combo[1]; lbl_card_combo_sub = c_combo[2]
+	res_cards_grid.add_child(res_card_combo)
+
+	var c_pts := _make_cyber_stat_card("◆ 獲得點數", Color(0.85, 0.45, 1.0))
+	res_card_pts = c_pts[0]; lbl_card_pts_val = c_pts[1]; lbl_card_pts_sub = c_pts[2]
+	res_cards_grid.add_child(res_card_pts)
+
+	# 4. Weak Kana Tiles Container
+	res_weak_box = PanelContainer.new()
+	var wsb := StyleBoxFlat.new()
+	wsb.bg_color = Color(0.08, 0.05, 0.10, 0.85)
+	wsb.border_width_left = 1; wsb.border_width_top = 1; wsb.border_width_right = 1; wsb.border_width_bottom = 1
+	wsb.border_color = Color(1.0, 0.4, 0.3, 0.6)
+	wsb.set_corner_radius_all(8)
+	wsb.set_content_margin_all(8)
+	res_weak_box.add_theme_stylebox_override("panel", wsb)
+	res_weak_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	res_root.add_child(res_weak_box)
+
+	var weak_vb := HBoxContainer.new()
+	weak_vb.alignment = BoxContainer.ALIGNMENT_BEGIN
+	weak_vb.add_theme_constant_override("separation", 10)
+	res_weak_box.add_child(weak_vb)
+
+	var lbl_weak_title := Label.new()
+	lbl_weak_title.text = "▲ 待強化假名："
+	lbl_weak_title.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_weak_title.add_theme_font_size_override("font_size", 15)
+	lbl_weak_title.add_theme_color_override("font_color", Color(1.0, 0.5, 0.4))
+	lbl_weak_title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	weak_vb.add_child(lbl_weak_title)
+
+	res_weak_tiles = HFlowContainer.new()
+	res_weak_tiles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	res_weak_tiles.add_theme_constant_override("h_separation", 8)
+	res_weak_tiles.add_theme_constant_override("v_separation", 6)
+	weak_vb.add_child(res_weak_tiles)
+
+	# 5. Knowledge Capsule
+	res_knowledge_box = PanelContainer.new()
+	var knsb := StyleBoxFlat.new()
+	knsb.bg_color = Color(0.05, 0.08, 0.16, 0.85)
+	knsb.border_width_left = 1; knsb.border_width_top = 1; knsb.border_width_right = 1; knsb.border_width_bottom = 1
+	knsb.border_color = Color(0.2, 0.7, 0.9, 0.4)
+	knsb.set_corner_radius_all(8)
+	knsb.set_content_margin_all(8)
+	res_knowledge_box.add_theme_stylebox_override("panel", knsb)
+	res_knowledge_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	res_root.add_child(res_knowledge_box)
+
+	lbl_res_knowledge = Label.new()
+	lbl_res_knowledge.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_res_knowledge.add_theme_font_size_override("font_size", 14)
+	lbl_res_knowledge.add_theme_color_override("font_color", Color(0.8, 0.92, 1.0))
+	lbl_res_knowledge.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	res_knowledge_box.add_child(lbl_res_knowledge)
+
+	# 6. Action Buttons Bar
 	result_actions = GridContainer.new()
-	result_actions.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	result_actions.add_theme_constant_override("h_separation", 14)
-	result_actions.add_theme_constant_override("v_separation", 14)
-	result_body.add_child(result_actions)
-	btn_retry = _button(I18n.t("BTN_RETRY", "重玩"))
+	result_actions.columns = 4
+	result_actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	result_actions.add_theme_constant_override("h_separation", 10)
+	result_actions.add_theme_constant_override("v_separation", 8)
+	res_root.add_child(result_actions)
+
 	btn_next = _button(I18n.t("BTN_NEXT", "下一關"))
 	btn_review = _button(I18n.t("BTN_REVIEW", "錯題練習"))
+	btn_retry = _button(I18n.t("BTN_RETRY", "重玩"))
 	btn_select = _button(I18n.t("BTN_SELECT", "回選關"))
 	btn_save_retry = _button(I18n.t("BTN_SAVE_RETRY", "重試存檔"))
 	btn_kata_next = _button(I18n.t("BTN_START_KATA", "開始片假名"))
@@ -1583,12 +1739,21 @@ func _build_results() -> void:
 	_art_button(btn_kata_next, "btn_next")
 	btn_save_retry.visible = false
 	btn_kata_next.visible = false
-	_art_button(btn_retry, "btn_retry")
 	_art_button(btn_next, "btn_next")
-	_art_button(btn_review, "btn_small", 32)
-	_art_button(btn_select, "btn_small", 32)
-	for button in [btn_retry, btn_next, btn_review, btn_select, btn_save_retry, btn_kata_next]:
+	_art_button(btn_review, "btn_primary", 32)
+	_art_button(btn_retry, "btn_retry")
+	_art_button(btn_select, "btn_secondary", 32)
+	for button in [btn_next, btn_review, btn_retry, btn_select, btn_save_retry, btn_kata_next]:
 		result_actions.add_child(button)
+
+	# Keep result_body & lbl_result present for compatibility & tests
+	result_body = BoxContainer.new()
+	res_root.add_child(result_body)
+	lbl_result = _result_label("", 14)
+	lbl_result.visible = false
+	result_body.add_child(lbl_result)
+
+	# Connections
 	btn_retry.pressed.connect(func():
 		fade_transition(func():
 			if is_drill:
@@ -1659,34 +1824,60 @@ func _layout_result_cards() -> void:
 	var viewport_size := get_viewport().get_visible_rect().size
 	var landscape := viewport_size.x >= viewport_size.y
 	var insets: Dictionary = get_safe_insets()
-	var touch_height := 220.0 if landscape else 172.0
-	result_body.vertical = not landscape
-	var action_count := result_actions.get_children().filter(func(b): return b.visible).size()
-	result_actions.columns = (2 if action_count > 4 else 1) if landscape else 2
-	lbl_result_heading.add_theme_font_size_override("font_size", 96 if landscape else 72)
-	rank_box.custom_minimum_size = Vector2(190, 92) if landscape else Vector2(160, 90)
-	rank_box.pivot_offset = rank_box.custom_minimum_size * 0.5
-	lbl_rank.add_theme_font_size_override("font_size", 64 if landscape else 54)
-	var max_w: float = viewport_size.x - 140.0 - float(insets.left) - float(insets.right)
-	lbl_result.custom_minimum_size.x = minf(1640.0 if landscape else 900.0, max_w)
-	lbl_result.add_theme_font_size_override("font_size", 70 if landscape else 44)
-	res_badge.custom_minimum_size = Vector2(250, 90) if landscape else Vector2(180, 70)
-	(res_badge.get_child(0) as Label).add_theme_font_size_override("font_size", 44 if landscape else 34)
-	for button in [btn_retry, btn_next, btn_review, btn_select, btn_save_retry, btn_kata_next]:
-		button.custom_minimum_size = Vector2(580.0 if landscape else 360.0, touch_height)
-		button.add_theme_font_size_override("font_size", 80 if landscape else 46)
+	var touch_height := 56.0 if landscape else 50.0
+	var max_w: float = minf(960.0 if landscape else 620.0, viewport_size.x - 48.0 - float(insets.left) - float(insets.right))
+
+	if is_instance_valid(results_box) and results_box.get_child_count() > 0:
+		var pc := results_box.get_child(0) as Control
+		if pc != null:
+			pc.custom_minimum_size.x = max_w
+
+	if is_instance_valid(lbl_result_heading):
+		lbl_result_heading.add_theme_font_size_override("font_size", 48 if landscape else 38)
+	if is_instance_valid(rank_box):
+		rank_box.custom_minimum_size = Vector2(90, 52) if landscape else Vector2(80, 46)
+		rank_box.pivot_offset = rank_box.custom_minimum_size * 0.5
+	if is_instance_valid(lbl_rank):
+		lbl_rank.add_theme_font_size_override("font_size", 30 if landscape else 24)
+	if is_instance_valid(res_badge):
+		res_badge.custom_minimum_size = Vector2(120, 44) if landscape else Vector2(100, 38)
+		if res_badge.get_child_count() > 0:
+			(res_badge.get_child(0) as Label).add_theme_font_size_override("font_size", 20 if landscape else 16)
+
+	if is_instance_valid(res_cards_grid):
+		res_cards_grid.columns = 2
+		var card_w := (max_w - 70.0) * 0.5
+		var card_h := 82.0 if landscape else 76.0
+		for card in [res_card_time, res_card_acc, res_card_combo, res_card_pts]:
+			if card != null and is_instance_valid(card):
+				card.custom_minimum_size = Vector2(card_w, card_h)
+
+	if is_instance_valid(result_actions):
+		var action_count := result_actions.get_children().filter(func(b): return b.visible).size()
+		result_actions.columns = action_count if (landscape and action_count <= 4) else 2
+		var btn_w := (max_w - 60.0) / float(maxi(1, result_actions.columns)) - 10.0
+		for button in [btn_retry, btn_next, btn_review, btn_select, btn_save_retry, btn_kata_next]:
+			if button != null and is_instance_valid(button):
+				button.custom_minimum_size = Vector2(btn_w, touch_height)
+				button.add_theme_font_size_override("font_size", 22 if landscape else 18)
+
 	for button in [btn_review_back, btn_review_next, btn_review_replay]:
-		button.custom_minimum_size = Vector2(420.0 if landscape else 350.0, touch_height)
-		button.add_theme_font_size_override("font_size", 80 if landscape else 46)
-	var choice_width := minf(270.0 if landscape else 210.0, max_w / lane_count - 16.0)
+		if button != null and is_instance_valid(button):
+			button.custom_minimum_size = Vector2(260.0 if landscape else 200.0, touch_height)
+			button.add_theme_font_size_override("font_size", 22 if landscape else 18)
+	var choice_width := minf(220.0 if landscape else 180.0, max_w / lane_count - 16.0)
 	for button in review_choices:
-		button.custom_minimum_size = Vector2(choice_width, touch_height)
-		button.add_theme_font_size_override("font_size", 104 if landscape else 78)
-	lbl_review_heading.add_theme_font_size_override("font_size", 112 if landscape else 68)
+		if button != null and is_instance_valid(button):
+			button.custom_minimum_size = Vector2(choice_width, touch_height)
+			button.add_theme_font_size_override("font_size", 56 if landscape else 42)
+	if is_instance_valid(lbl_review_heading):
+		lbl_review_heading.add_theme_font_size_override("font_size", 42 if landscape else 32)
 	for label in [lbl_review_progress, lbl_review_feedback]:
-		label.add_theme_font_size_override("font_size", 80 if landscape else 46)
-	lbl_review_feedback.custom_minimum_size = Vector2(minf(1440.0 if landscape else 950.0, viewport_size.x - 140.0), 200.0 if landscape else 125.0)
-	lbl_review_feedback.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		if label != null and is_instance_valid(label):
+			label.add_theme_font_size_override("font_size", 22 if landscape else 18)
+	if is_instance_valid(lbl_review_feedback):
+		lbl_review_feedback.custom_minimum_size = Vector2(minf(800.0 if landscape else 550.0, viewport_size.x - 48.0), 80.0 if landscape else 60.0)
+		lbl_review_feedback.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
 func _touch_button(text: String, size: int, art: String, margin := 0) -> Panel:
 	var p := Panel.new()
@@ -3043,7 +3234,7 @@ func _refresh_endless_ui() -> void:
 	stats_card.add_child(stats_vb)
 
 	var lbl_stats_title := Label.new()
-	lbl_stats_title.text = I18n.t("ENDLESS_BEST_TITLE", "👑 個人歷史最佳戰績")
+	lbl_stats_title.text = I18n.t("ENDLESS_BEST_TITLE", "★ 個人歷史最佳戰績")
 	lbl_stats_title.add_theme_font_override("font", Assets.FONT_HUD)
 	lbl_stats_title.add_theme_font_size_override("font_size", int(22 * UI))
 	lbl_stats_title.add_theme_color_override("font_color", Color(1.0, 0.88, 0.3))
@@ -3083,7 +3274,7 @@ func _refresh_endless_ui() -> void:
 	rules_card.add_child(rules_vb)
 
 	var l_rt := Label.new()
-	l_rt.text = I18n.t("ENDLESS_RULES_TITLE", "⚡ 極限挑戰機制")
+	l_rt.text = I18n.t("ENDLESS_RULES_TITLE", "★ 極限挑戰機制")
 	l_rt.add_theme_font_override("font", Assets.FONT_HUD)
 	l_rt.add_theme_font_size_override("font_size", int(18 * UI))
 	l_rt.add_theme_color_override("font_color", Color(0.4, 0.9, 1.0))
@@ -3100,7 +3291,7 @@ func _refresh_endless_ui() -> void:
 	var hist: Array = ed.get("history", [])
 	if not hist.is_empty():
 		var hist_title := Label.new()
-		hist_title.text = I18n.t("ENDLESS_TOP5_TITLE", "🏆 歷史戰績 TOP 5")
+		hist_title.text = I18n.t("ENDLESS_TOP5_TITLE", "★ 歷史戰績 TOP 5")
 		hist_title.add_theme_font_override("font", Assets.FONT_HUD)
 		hist_title.add_theme_font_size_override("font_size", int(18 * UI))
 		hist_title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
@@ -3123,7 +3314,7 @@ func _refresh_endless_ui() -> void:
 			endless_list.add_child(h_row)
 
 			var h_lbl := Label.new()
-			var medal: String = ["🥇", "🥈", "🥉", "④", "⑤"][i] if i < 5 else "•"
+			var medal: String = ["①", "②", "③", "④", "⑤"][i] if i < 5 else "•"
 			h_lbl.text = I18n.t("ENDLESS_TOP5_ROW", "%s 第 %d 名：%d 分  (%.0fm · %d 題 · %d 連擊)") % [
 				medal, i + 1, int(h_item.get("score", 0)),
 				float(h_item.get("distance", 0.0)),
@@ -3239,7 +3430,7 @@ func _finish_endless(reason := "") -> void:
 	rkt.tween_property(rank_box, "scale", Vector2.ONE, 0.28).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	rkt.parallel().tween_property(rank_box, "modulate:a", 1.0, 0.15)
 
-	lbl_result.text = I18n.t("ENDLESS_RESULT_STATS", "★ 無盡極限挑戰 ★\n\n最終得分 %d%s\n突破波次 WAVE %d　奔馳距離 %.1f 公尺\n答對 %d 題　最佳連擊 %d\n獲得點數 +%d（總點數 %d）\n\n👑 歷史最高分：%d 分") % [
+	lbl_result.text = I18n.t("ENDLESS_RESULT_STATS", "★ 無盡極限挑戰 ★\n\n最終得分 %d%s\n突破波次 WAVE %d　奔馳距離 %.1f 公尺\n答對 %d 題　最佳連擊 %d\n獲得點數 +%d（總點數 %d）\n\n★ 歷史最高分：%d 分") % [
 		endless_score,
 		I18n.t("ENDLESS_RESULT_NEW_BEST", "（新紀錄！）") if new_best else "",
 		endless_tier + 1,
@@ -3252,6 +3443,17 @@ func _finish_endless(reason := "") -> void:
 	]
 
 	res_badge.visible = new_best
+	res_chip_stage.text = "★ %s · SURVIVAL" % I18n.t("BTN_ENDLESS", "無盡挑戰")
+	lbl_card_time_val.text = "%d 分" % endless_score
+	lbl_card_time_sub.text = "★ 歷史最高分：%d 分" % save.get_endless_best_score()
+	lbl_card_acc_val.text = "WAVE %d" % (endless_tier + 1)
+	lbl_card_acc_sub.text = "奔馳距離 %.1f 公尺" % player_dist
+	lbl_card_combo_val.text = "%d 題正解" % correct
+	lbl_card_combo_sub.text = "最佳連擊 %d 連擊" % best_combo
+	lbl_card_pts_val.text = "+%d 點" % last_points
+	lbl_card_pts_sub.text = "累計持有 %d 點" % save.points()
+	res_weak_box.visible = false
+	res_knowledge_box.visible = false
 	for i in 3:
 		var st_child := res_stars.get_child(i) as TextureRect
 		st_child.visible = false
@@ -3514,7 +3716,7 @@ func _render_drill_panel() -> void:
 		["hira", I18n.t("DRILL_QUICK_HIRA", "只選平假")],
 		["kata", I18n.t("DRILL_QUICK_KATA", "只選片假")],
 		["confuse", I18n.t("DRILL_QUICK_CONFUSABLE", "易混淆組")],
-		["weak", I18n.t("DRILL_QUICK_WEAK", "⚡ 弱點急行軍")]
+		["weak", I18n.t("DRILL_QUICK_WEAK", "★ 弱點急行軍")]
 	]
 	for qc in q_configs:
 		var q_btn := _button(qc[1])
@@ -3693,7 +3895,7 @@ func _quick_select_drill(mode: String) -> void:
 						if weak_kana.has(pair[0]):
 							drill_selected_rows[r] = true
 							break
-				_notice(I18n.t("NOTICE_WEAK_SELECTED", "⚡ 已鎖定個人弱點行：%s") % "、".join(weak_kana))
+				_notice(I18n.t("NOTICE_WEAK_SELECTED", "★ 已鎖定個人弱點行：%s") % "、".join(weak_kana))
 	_refresh_chart_ui()
 
 func start_custom_drill() -> void:
@@ -3813,16 +4015,19 @@ func _layout_select_scroll() -> void:
 	var insets: Dictionary = get_safe_insets()
 	var footer_height := maxf(90.0, short_side * 0.113)
 	if is_instance_valid(select_scroll):
-		select_scroll.custom_minimum_size.y = maxf(150.0, view.y - 560.0 * UI - (footer_height - 90.0) - float(insets.top) - float(insets.bottom))
+		select_scroll.custom_minimum_size.y = maxf(140.0, view.y - 600.0 * UI - (footer_height - 90.0) - float(insets.top) - float(insets.bottom))
 	if not is_instance_valid(btn_tutorial) or not btn_tutorial.is_inside_tree():
 		return
-	var font_size := roundi(short_side * 0.036)
+	var font_size := roundi(short_side * 0.034)
 	var compact := font_size * 9.0 + 64.0 > btn_tutorial.custom_minimum_size.x
 	btn_tutorial.text = I18n.t("BTN_TUTORIAL_COMPACT", "新手練習\n3 題") if compact else I18n.t("BTN_TUTORIAL", "新手練習 · 3 題")
 	btn_settings.text = (I18n.t("SETTINGS_BTN_COMPACT", "設定\n%s模式") if compact else I18n.t("SETTINGS_BTN", "設定（%s模式）")) % mode_name()
-	for button in [btn_tutorial, btn_settings]:
-		button.custom_minimum_size.y = footer_height
-		button.add_theme_font_size_override("font_size", font_size)
+	if is_instance_valid(btn_to_title):
+		btn_to_title.text = I18n.t("BTN_TO_TITLE", "回主畫面")
+	for button in [btn_tutorial, btn_settings, btn_to_title]:
+		if button != null and is_instance_valid(button):
+			button.custom_minimum_size.y = footer_height
+			button.add_theme_font_size_override("font_size", font_size)
 
 ## Touch buttons scale with the short side of the (stretched) canvas so they stay
 ## comfortably large in portrait and landscape.
@@ -3929,95 +4134,103 @@ func show_select() -> void:
 	var insets: Dictionary = get_safe_insets()
 	var vs: Vector2 = get_viewport().get_visible_rect().size
 	var w: float = minf(560.0 * UI, vs.x - 90.0 * UI - float(insets.left) - float(insets.right))
-	var title := Label.new()
-	title.text = I18n.t("TITLE_SELECT", "選關")
-	title.add_theme_font_override("font", Assets.FONT_HUD)
-	title.add_theme_font_size_override("font_size", int(44 * UI))
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_ink(title)
-	select_list.add_child(title)
 
 	var rank_info: Dictionary = save.get_player_rank()
 	var daily_info: Dictionary = save.check_daily_status()
 
-	var banner := HBoxContainer.new()
-	banner.alignment = BoxContainer.ALIGNMENT_CENTER
-	banner.add_theme_constant_override("separation", 14)
-	select_list.add_child(banner)
+	# 1. Top HUD Profile Header Bar
+	var top_hud := PanelContainer.new()
+	var th_sb := StyleBoxFlat.new()
+	th_sb.bg_color = Color(0.04, 0.05, 0.12, 0.92)
+	th_sb.border_width_left = 2; th_sb.border_width_top = 2; th_sb.border_width_right = 2; th_sb.border_width_bottom = 2
+	th_sb.border_color = Color(0.2, 0.85, 1.0, 0.45)
+	th_sb.set_corner_radius_all(10)
+	th_sb.set_content_margin_all(8)
+	top_hud.add_theme_stylebox_override("panel", th_sb)
+	top_hud.custom_minimum_size = Vector2(w, 54 * UI)
+	select_list.add_child(top_hud)
+
+	var th_hbox := HBoxContainer.new()
+	th_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	th_hbox.add_theme_constant_override("separation", 14)
+	top_hud.add_child(th_hbox)
 
 	var lbl_rank := Label.new()
 	lbl_rank.text = "%s %s" % [rank_info.badge, rank_info.title]
 	lbl_rank.add_theme_font_override("font", Assets.FONT_HUD)
 	lbl_rank.add_theme_font_size_override("font_size", int(20 * UI))
 	lbl_rank.add_theme_color_override("font_color", rank_info.color)
-	banner.add_child(lbl_rank)
+	th_hbox.add_child(lbl_rank)
+
+	var title := Label.new()
+	title.text = I18n.t("TITLE_SELECT", "選關")
+	title.add_theme_font_override("font", Assets.FONT_HUD)
+	title.add_theme_font_size_override("font_size", int(24 * UI))
+	title.add_theme_color_override("font_color", Color(1.0, 0.95, 0.8))
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	th_hbox.add_child(title)
+
+	lbl_points = Label.new()
+	lbl_points.text = I18n.t("POINTS_UNREADABLE", "讀不到紀錄") if save.unreadable else (I18n.t("POINTS_TOTAL", "總點數 %d") % save.points())
+	if progress_pending:
+		lbl_points.text += I18n.t("POINTS_PENDING", "・未存檔")
+	lbl_points.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_points.add_theme_font_size_override("font_size", int(18 * UI))
+	lbl_points.add_theme_color_override("font_color", Color(0.85, 0.55, 1.0))
+	th_hbox.add_child(lbl_points)
 
 	var lbl_streak := Label.new()
-	lbl_streak.text = "🔥 %s %d %s" % [I18n.t("DAILY_STREAK_PRE", "連續"), daily_info.streak, I18n.t("DAILY_STREAK_POST", "天")]
+	lbl_streak.text = "★ %s %d %s" % [I18n.t("DAILY_STREAK_PRE", "連續"), daily_info.streak, I18n.t("DAILY_STREAK_POST", "天")]
 	lbl_streak.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_streak.add_theme_font_size_override("font_size", int(20 * UI))
-	lbl_streak.add_theme_color_override("font_color", Color(1.0, 0.58, 0.2))
-	banner.add_child(lbl_streak)
+	lbl_streak.add_theme_font_size_override("font_size", int(18 * UI))
+	lbl_streak.add_theme_color_override("font_color", Color(1.0, 0.65, 0.2))
+	th_hbox.add_child(lbl_streak)
 
-	btn_daily = _button(I18n.t("BTN_DAILY_RUN", "🔥 今日特快 (獎勵 +100點)") if not daily_info.completed else I18n.t("BTN_DAILY_DONE", "🔥 今日特快 (今日已達成 ★★★)"))
+	# 2. Featured Daily Challenge (btn_daily)
+	btn_daily = _button(I18n.t("BTN_DAILY_RUN", "★ 今日特快 (獎勵 +100點)") if not daily_info.completed else I18n.t("BTN_DAILY_DONE", "★ 今日特快 (今日已達成 ★★★)"))
 	_art_button(btn_daily, "btn_primary" if not daily_info.completed else "btn_secondary", 32)
 	btn_daily.custom_minimum_size = Vector2(w, 52 * UI)
 	btn_daily.add_theme_font_size_override("font_size", int(20 * UI))
 	btn_daily.pressed.connect(start_daily_run)
 	select_list.add_child(btn_daily)
 
-	var pts_row := HFlowContainer.new()
-	pts_row.alignment = FlowContainer.ALIGNMENT_CENTER
-	pts_row.add_theme_constant_override("h_separation", 8)
-	pts_row.add_theme_constant_override("v_separation", 8)
-	select_list.add_child(pts_row)
+	# 3. 4-Column Navigation Bar
+	var nav_grid := GridContainer.new()
+	nav_grid.columns = 4
+	nav_grid.add_theme_constant_override("h_separation", 8)
+	nav_grid.add_theme_constant_override("v_separation", 8)
+	select_list.add_child(nav_grid)
 
-	lbl_points = Label.new()
-	lbl_points.text = I18n.t("POINTS_UNREADABLE", "讀不到紀錄") if save.unreadable else (I18n.t("POINTS_TOTAL", "總點數 %d") % save.points())
-	if progress_pending:
-		lbl_points.text += I18n.t("POINTS_PENDING", "・進度未存檔")
-	lbl_points.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_points.add_theme_font_size_override("font_size", int(24 * UI))
-	lbl_points.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_ink(lbl_points)
-	pts_row.add_child(lbl_points)
+	var nav_btn_w := (w - 24.0) / 4.0
 
 	btn_chart = _button(I18n.t("BTN_CHART", "五十音・特訓"))
 	_art_button(btn_chart, "btn_secondary", 32)
-	btn_chart.custom_minimum_size = Vector2(120, 48) * UI
-	btn_chart.add_theme_font_size_override("font_size", int(17 * UI))
+	btn_chart.custom_minimum_size = Vector2(nav_btn_w, 46 * UI)
+	btn_chart.add_theme_font_size_override("font_size", int(16 * UI))
 	btn_chart.pressed.connect(func(): show_chart())
-	pts_row.add_child(btn_chart)
+	nav_grid.add_child(btn_chart)
 
 	btn_endless = _button(I18n.t("BTN_ENDLESS", "★無盡挑戰"))
 	_art_button(btn_endless, "btn_primary", 32)
-	btn_endless.custom_minimum_size = Vector2(120, 48) * UI
-	btn_endless.add_theme_font_size_override("font_size", int(17 * UI))
+	btn_endless.custom_minimum_size = Vector2(nav_btn_w, 46 * UI)
+	btn_endless.add_theme_font_size_override("font_size", int(16 * UI))
 	btn_endless.pressed.connect(show_endless)
-	pts_row.add_child(btn_endless)
+	nav_grid.add_child(btn_endless)
 
 	btn_shop = _button(I18n.t("BTN_SHOP", "改裝商城"))
 	_art_button(btn_shop, "btn_secondary", 32)
-	btn_shop.custom_minimum_size = Vector2(100, 48) * UI
-	btn_shop.add_theme_font_size_override("font_size", int(17 * UI))
+	btn_shop.custom_minimum_size = Vector2(nav_btn_w, 46 * UI)
+	btn_shop.add_theme_font_size_override("font_size", int(16 * UI))
 	btn_shop.pressed.connect(show_shop)
-	pts_row.add_child(btn_shop)
+	nav_grid.add_child(btn_shop)
 
 	btn_achievements = _button(I18n.t("BTN_ACHIEVEMENTS", "成就獎章"))
 	_art_button(btn_achievements, "btn_secondary", 32)
-	btn_achievements.custom_minimum_size = Vector2(100, 48) * UI
-	btn_achievements.add_theme_font_size_override("font_size", int(17 * UI))
+	btn_achievements.custom_minimum_size = Vector2(nav_btn_w, 46 * UI)
+	btn_achievements.add_theme_font_size_override("font_size", int(16 * UI))
 	btn_achievements.pressed.connect(show_achievements)
-	pts_row.add_child(btn_achievements)
-
-	btn_to_title = _button(I18n.t("BTN_TO_TITLE", "回主標題"))
-	_art_button(btn_to_title, "btn_secondary", 32)
-	btn_to_title.custom_minimum_size = Vector2(90, 48) * UI
-	btn_to_title.add_theme_font_size_override("font_size", int(17 * UI))
-	btn_to_title.pressed.connect(func():
-		fade_transition(func(): show_title(), 0.2, 0.2)
-	)
-	pts_row.add_child(btn_to_title)
+	nav_grid.add_child(btn_achievements)
 	if progress_pending:
 		var retry_save := _button(I18n.t("BTN_SAVE_RETRY", "重試存檔"))
 		_art_button(retry_save, "btn_small", 32)
@@ -4138,18 +4351,27 @@ func show_select() -> void:
 	var footer := HBoxContainer.new()
 	footer.add_theme_constant_override("separation", 10)
 	select_list.add_child(footer)
+	var f_btn_w := (w - 20.0) / 3.0
 	var tutorial_recommended: bool = lane_count == 3 and save.data.levels.is_empty() and not bool(save.get_setting("tutorial_seen", false))
 	btn_tutorial = _button("新手練習 · 3 題")
 	_art_button(btn_tutorial, "btn_primary" if tutorial_recommended else "btn_secondary", 32)
-	btn_tutorial.custom_minimum_size = Vector2(w * 0.5 - 5, 90)
+	btn_tutorial.custom_minimum_size = Vector2(f_btn_w, 56 * UI)
 	btn_tutorial.disabled = lane_count != 3
 	btn_tutorial.pressed.connect(start_tutorial)
 	footer.add_child(btn_tutorial)
 	btn_settings = _button("")
 	_art_button(btn_settings, "btn_secondary", 32)
-	btn_settings.custom_minimum_size = Vector2(w * 0.5 - 5, 90)
+	btn_settings.custom_minimum_size = Vector2(f_btn_w, 56 * UI)
 	btn_settings.pressed.connect(show_settings)
 	footer.add_child(btn_settings)
+	btn_to_title = _button(I18n.t("BTN_TO_TITLE", "回主畫面"))
+	_art_button(btn_to_title, "btn_secondary", 32)
+	btn_to_title.custom_minimum_size = Vector2(f_btn_w, 56 * UI)
+	btn_to_title.add_theme_font_size_override("font_size", int(18 * UI))
+	btn_to_title.pressed.connect(func():
+		fade_transition(func(): show_title(), 0.2, 0.2)
+	)
+	footer.add_child(btn_to_title)
 	_refresh_mode_buttons()
 	select_box.visible = true
 	if tutorial_recommended:
@@ -5022,7 +5244,7 @@ func _finish(cleared: bool, reason := "") -> void:
 			_persist_progress()
 			sfx("star", 1.3, 3.0)
 			if daily_res.first_today:
-				_notice(I18n.t("HUD_DAILY_STREAK_POPUP", "🔥 今日特快達成！連續第 %d 天！獲得 +100 點") % daily_res.streak)
+				_notice(I18n.t("HUD_DAILY_STREAK_POPUP", "★ 今日特快達成！連續第 %d 天！獲得 +100 點") % daily_res.streak)
 		elif is_drill:
 			last_points = correct * 2
 			save.add_points(last_points)
@@ -5090,7 +5312,7 @@ func _finish(cleared: bool, reason := "") -> void:
 	if shield_bonus > 0.0:
 		lbl_result.text += I18n.t("RESULTS_SHIELD_BONUS_INFO", "\n★ 破盾時間獎勵：-%.1f 秒") % shield_bonus
 	if is_daily:
-		lbl_result.text += I18n.t("RESULTS_DAILY_STREAK_LINE", "\n\n🔥 每日疾走連續簽到：第 %d 天！") % save.get_daily().get("streak", 1)
+		lbl_result.text += I18n.t("RESULTS_DAILY_STREAK_LINE", "\n\n★ 每日疾走連續簽到：第 %d 天！") % save.get_daily().get("streak", 1)
 	if cleared and stars < 3:
 		var next_limit := float(lvl.star2_s if stars < 2 else lvl.star3_s)
 		lbl_result.text += I18n.t("RESULTS_NEXT_STAR", "\n再快 %.2f 秒可達 %d 星") % [maxf(0.0, clock() - next_limit), stars + 1]
@@ -5103,6 +5325,92 @@ func _finish(cleared: bool, reason := "") -> void:
 	if not knowledge.is_empty():
 		lbl_result.text += I18n.t("RESULTS_KNOWLEDGE", "\n\n小知識：%s") % knowledge
 	res_badge.visible = new_best
+
+	# Populate Visual Dashboard Cards
+	if is_daily:
+		res_chip_stage.text = "★ %s · %s" % [I18n.t("DAILY_RUN_TITLE", "每日特快"), distance_name()]
+	elif is_drill:
+		res_chip_stage.text = "★ %s · %s" % [I18n.t("DRILL_TITLE", "假名特訓"), mode_name()]
+	else:
+		res_chip_stage.text = "%s · %s · %s模式" % [str(lvl.get("name", "")), distance_name(), mode_name()]
+
+	lbl_card_time_val.text = "%.2f 秒" % clock()
+	var time_subs: Array = []
+	if penalty > 0.0:
+		time_subs.append("+%.1fs 罰時" % penalty)
+	if shield_bonus > 0.0:
+		time_subs.append("-%.1fs 破盾" % shield_bonus)
+	if cleared and stars < 3:
+		var next_limit := float(lvl.star2_s if stars < 2 else lvl.star3_s)
+		time_subs.append("差 %.2fs 達 %d 星" % [maxf(0.0, clock() - next_limit), stars + 1])
+	lbl_card_time_sub.text = "  ".join(time_subs) if not time_subs.is_empty() else "節奏完美！"
+
+	lbl_card_acc_val.text = "%d / %d" % [correct, int(lvl.target_correct)]
+	if wrong == 0 and missed == 0:
+		lbl_card_acc_sub.text = "★ PERFECT 完美過關！"
+		lbl_card_acc_sub.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
+	else:
+		lbl_card_acc_sub.text = "× 答錯 %d   ○ 漏答 %d" % [wrong, missed]
+		lbl_card_acc_sub.add_theme_color_override("font_color", Color(0.9, 0.6, 0.6))
+
+	lbl_card_combo_val.text = "%d MAX" % best_combo
+	lbl_card_combo_sub.text = "體力 %d / %d" % [hp, max_hp]
+
+	lbl_card_pts_val.text = "+%d 點" % last_points
+	var pts_sub_txt := "累計持有 %d 點" % save.points()
+	if is_daily:
+		pts_sub_txt += " (★ 連續第 %d 天)" % save.get_daily().get("streak", 1)
+	lbl_card_pts_sub.text = pts_sub_txt
+
+	# Weak Kana Visual Tiles
+	for child in res_weak_tiles.get_children():
+		res_weak_tiles.remove_child(child)
+		child.queue_free()
+
+	if not review_items.is_empty():
+		res_weak_box.visible = true
+		for kana in review_items.keys().slice(0, 8):
+			var tile := PanelContainer.new()
+			var tsb := StyleBoxFlat.new()
+			tsb.bg_color = Color(0.12, 0.05, 0.08, 0.90)
+			tsb.border_width_left = 2; tsb.border_width_top = 2; tsb.border_width_right = 2; tsb.border_width_bottom = 2
+			tsb.border_color = Color(1.0, 0.35, 0.25, 0.85)
+			tsb.set_corner_radius_all(8)
+			tsb.set_content_margin_all(4)
+			tile.add_theme_stylebox_override("panel", tsb)
+			tile.custom_minimum_size = Vector2(48, 52)
+
+			var tvb := VBoxContainer.new()
+			tvb.alignment = BoxContainer.ALIGNMENT_CENTER
+			tvb.add_theme_constant_override("separation", 0)
+			tile.add_child(tvb)
+
+			var klbl := Label.new()
+			klbl.text = kana
+			klbl.add_theme_font_override("font", Art.FONT_KANA)
+			klbl.add_theme_font_size_override("font_size", 22)
+			klbl.add_theme_color_override("font_color", Color(1.0, 0.95, 0.7))
+			klbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			tvb.add_child(klbl)
+
+			var rlbl := Label.new()
+			rlbl.text = _romaji(kana)
+			rlbl.add_theme_font_override("font", Assets.FONT_HUD)
+			rlbl.add_theme_font_size_override("font_size", 10)
+			rlbl.add_theme_color_override("font_color", Color(1.0, 0.6, 0.5))
+			rlbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			tvb.add_child(rlbl)
+
+			res_weak_tiles.add_child(tile)
+	else:
+		res_weak_box.visible = false
+
+	# Knowledge capsule
+	if not knowledge.is_empty():
+		res_knowledge_box.visible = true
+		lbl_res_knowledge.text = "【小知識】%s" % knowledge
+	else:
+		res_knowledge_box.visible = false
 	btn_retry.text = I18n.t("BTN_RETRY_DRILL", "再練一次") if is_drill else I18n.t("BTN_RETRY", "重來")
 	btn_select.text = I18n.t("BTN_BACK_CHART", "回五十音表") if is_drill else I18n.t("BTN_SELECT", "回選關")
 	if is_daily:
