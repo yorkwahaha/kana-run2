@@ -47,6 +47,7 @@ def cachebust(web: Path) -> str:
 
     # Ensure Cloudflare Pages isolation and caching headers
     (web / "_headers").write_text(CLOUDFLARE_HEADERS, encoding="utf-8")
+    (web / ".nojekyll").touch()
 
     if name != "index":
         return name
