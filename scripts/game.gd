@@ -581,6 +581,9 @@ var btn_select: Button
 var result_body: BoxContainer
 var result_actions: GridContainer
 var btn_review: Button
+var res_split_box: BoxContainer
+var res_left_deck: VBoxContainer
+var res_right_deck: VBoxContainer
 var res_chip_stage: Label
 var res_header_row: HBoxContainer
 var res_cards_grid: GridContainer
@@ -1344,60 +1347,141 @@ func _build_hud() -> void:
 	var st := _panel_center()
 	settings_box = st[0]
 	st[1].add_theme_constant_override("separation", 10)
+
+	var pc_set := settings_box.get_child(0) as PanelContainer
+	if pc_set != null:
+		var psb := StyleBoxFlat.new()
+		psb.bg_color = Color(0.04, 0.05, 0.11, 0.95)
+		psb.border_width_left = 2; psb.border_width_top = 2; psb.border_width_right = 2; psb.border_width_bottom = 2
+		psb.border_color = Color(0.2, 0.85, 1.0, 0.75)
+		psb.set_corner_radius_all(14)
+		psb.set_content_margin_all(18)
+		pc_set.add_theme_stylebox_override("panel", psb)
+
 	lbl_settings_mode = Label.new()
 	lbl_settings_mode.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_settings_mode.add_theme_font_size_override("font_size", int(44 * UI))
+	lbl_settings_mode.add_theme_font_size_override("font_size", int(36 * UI))
 	lbl_settings_mode.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_ink(lbl_settings_mode)
 	st[1].add_child(lbl_settings_mode)
-	btn_mode_race = _button("賽車：按住加速／煞車・可定速")
-	btn_mode_step = _button("點放模式：點一下 ±5 km/h")
+
+	btn_mode_race = _button("賽車模式")
+	btn_mode_step = _button("點放模式")
 	btn_vol_bgm = _button("")
 	btn_vol_sfx = _button("")
 	btn_vol_voice = _button("")
-	btn_settings_back = _button("返回")
+	btn_settings_back = _button("返回確認")
+
+	# Category 1: Control Mode Card
+	var mode_card := PanelContainer.new()
+	var m_sb := StyleBoxFlat.new()
+	m_sb.bg_color = Color(0.06, 0.08, 0.16, 0.85)
+	m_sb.border_width_left = 2; m_sb.border_width_top = 2; m_sb.border_width_right = 2; m_sb.border_width_bottom = 2
+	m_sb.border_color = Color(0.2, 0.75, 1.0, 0.45)
+	m_sb.set_corner_radius_all(10)
+	m_sb.set_content_margin_all(10)
+	mode_card.add_theme_stylebox_override("panel", m_sb)
+	st[1].add_child(mode_card)
+
+	var mode_vb := VBoxContainer.new()
+	mode_vb.add_theme_constant_override("separation", 6)
+	mode_card.add_child(mode_vb)
+
+	var lbl_mode_head := Label.new()
+	lbl_mode_head.text = "【 操控方案 CONTROL MODE 】"
+	lbl_mode_head.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_mode_head.add_theme_font_size_override("font_size", int(14 * UI))
+	lbl_mode_head.add_theme_color_override("font_color", Color(0.3, 0.9, 1.0))
+	mode_vb.add_child(lbl_mode_head)
+
 	var mode_choices := ButtonGroup.new()
 	for b in [btn_mode_race, btn_mode_step]:
-		b.custom_minimum_size = Vector2(560, 80) * UI
-		b.add_theme_font_size_override("font_size", int(30 * UI))
+		b.custom_minimum_size = Vector2(560, 72) * UI
+		b.add_theme_font_size_override("font_size", int(24 * UI))
 		b.toggle_mode = true
 		b.button_group = mode_choices
 		_art_button(b, "btn_primary", 32)
-		st[1].add_child(b)
+		mode_vb.add_child(b)
+
+	# Category 2: Audio Volume Card
+	var vol_card := PanelContainer.new()
+	var v_sb := StyleBoxFlat.new()
+	v_sb.bg_color = Color(0.06, 0.08, 0.16, 0.85)
+	v_sb.border_width_left = 2; v_sb.border_width_top = 2; v_sb.border_width_right = 2; v_sb.border_width_bottom = 2
+	v_sb.border_color = Color(0.3, 0.9, 0.6, 0.45)
+	v_sb.set_corner_radius_all(10)
+	v_sb.set_content_margin_all(10)
+	vol_card.add_theme_stylebox_override("panel", v_sb)
+	st[1].add_child(vol_card)
+
+	var vol_vb := VBoxContainer.new()
+	vol_vb.add_theme_constant_override("separation", 6)
+	vol_card.add_child(vol_vb)
+
+	var lbl_vol_head := Label.new()
+	lbl_vol_head.text = "【 音訊音量 AUDIO VOLUME 】"
+	lbl_vol_head.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_vol_head.add_theme_font_size_override("font_size", int(14 * UI))
+	lbl_vol_head.add_theme_color_override("font_color", Color(0.3, 0.95, 0.6))
+	vol_vb.add_child(lbl_vol_head)
+
 	var vol_hbox := HBoxContainer.new()
 	vol_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	vol_hbox.add_theme_constant_override("separation", 8)
-	st[1].add_child(vol_hbox)
+	vol_vb.add_child(vol_hbox)
 	for b in [btn_vol_bgm, btn_vol_sfx, btn_vol_voice]:
-		b.custom_minimum_size = Vector2(180, 80) * UI
-		b.add_theme_font_size_override("font_size", int(26 * UI))
+		b.custom_minimum_size = Vector2(180, 72) * UI
+		b.add_theme_font_size_override("font_size", int(20 * UI))
 		_art_button(b, "btn_secondary", 32)
 		vol_hbox.add_child(b)
+
+	# Category 3: System Preferences Card
+	var opt_card := PanelContainer.new()
+	var o_sb := StyleBoxFlat.new()
+	o_sb.bg_color = Color(0.06, 0.08, 0.16, 0.85)
+	o_sb.border_width_left = 2; o_sb.border_width_top = 2; o_sb.border_width_right = 2; o_sb.border_width_bottom = 2
+	o_sb.border_color = Color(0.85, 0.45, 1.0, 0.45)
+	o_sb.set_corner_radius_all(10)
+	o_sb.set_content_margin_all(10)
+	opt_card.add_theme_stylebox_override("panel", o_sb)
+	st[1].add_child(opt_card)
+
+	var opt_vb := VBoxContainer.new()
+	opt_vb.add_theme_constant_override("separation", 6)
+	opt_card.add_child(opt_vb)
+
+	var lbl_opt_head := Label.new()
+	lbl_opt_head.text = "【 系統偏好 PREFERENCES 】"
+	lbl_opt_head.add_theme_font_override("font", Assets.FONT_HUD)
+	lbl_opt_head.add_theme_font_size_override("font_size", int(14 * UI))
+	lbl_opt_head.add_theme_color_override("font_color", Color(0.85, 0.5, 1.0))
+	opt_vb.add_child(lbl_opt_head)
+
 	var opt_hbox := HBoxContainer.new()
 	opt_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	opt_hbox.add_theme_constant_override("separation", 8)
-	st[1].add_child(opt_hbox)
+	opt_vb.add_child(opt_hbox)
 
-	btn_lang = _button("語言：繁體中文")
-	btn_lang.custom_minimum_size = Vector2(180, 80) * UI
-	btn_lang.add_theme_font_size_override("font_size", int(24 * UI))
+	btn_lang = _button("語言")
+	btn_lang.custom_minimum_size = Vector2(180, 72) * UI
+	btn_lang.add_theme_font_size_override("font_size", int(20 * UI))
 	_art_button(btn_lang, "btn_secondary", 32)
 	opt_hbox.add_child(btn_lang)
 
-	btn_vibration = _button("震動：開啟")
-	btn_vibration.custom_minimum_size = Vector2(180, 80) * UI
-	btn_vibration.add_theme_font_size_override("font_size", int(24 * UI))
+	btn_vibration = _button("震動")
+	btn_vibration.custom_minimum_size = Vector2(180, 72) * UI
+	btn_vibration.add_theme_font_size_override("font_size", int(20 * UI))
 	_art_button(btn_vibration, "btn_secondary", 32)
 	opt_hbox.add_child(btn_vibration)
 
 	btn_hit_pitch = _button("")
-	btn_hit_pitch.custom_minimum_size = Vector2(180, 80) * UI
-	btn_hit_pitch.add_theme_font_size_override("font_size", int(24 * UI))
+	btn_hit_pitch.custom_minimum_size = Vector2(180, 72) * UI
+	btn_hit_pitch.add_theme_font_size_override("font_size", int(20 * UI))
 	_art_button(btn_hit_pitch, "btn_secondary", 32)
 	opt_hbox.add_child(btn_hit_pitch)
 
-	btn_settings_back.custom_minimum_size = Vector2(560, 80) * UI
-	btn_settings_back.add_theme_font_size_override("font_size", int(30 * UI))
+	btn_settings_back.custom_minimum_size = Vector2(560, 76) * UI
+	btn_settings_back.add_theme_font_size_override("font_size", int(26 * UI))
 	_art_button(btn_settings_back, "btn_secondary", 32)
 	st[1].add_child(btn_settings_back)
 
@@ -1515,10 +1599,13 @@ func _result_label(text: String, font_size: int) -> Label:
 func _make_cyber_stat_card(title_text: String, icon_accent: Color) -> Array:
 	var pc := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0.04, 0.05, 0.12, 0.90)
-	sb.border_width_left = 2; sb.border_width_top = 2; sb.border_width_right = 2; sb.border_width_bottom = 2
-	sb.border_color = icon_accent * 0.75
-	sb.set_corner_radius_all(10)
+	sb.bg_color = Color(0.04, 0.05, 0.12, 0.92)
+	sb.border_width_left = 3
+	sb.border_width_top = 1
+	sb.border_width_right = 1
+	sb.border_width_bottom = 1
+	sb.border_color = icon_accent * 0.85
+	sb.set_corner_radius_all(8)
 	sb.set_content_margin_all(8)
 	pc.add_theme_stylebox_override("panel", sb)
 
@@ -1529,20 +1616,20 @@ func _make_cyber_stat_card(title_text: String, icon_accent: Color) -> Array:
 	var title := Label.new()
 	title.text = title_text
 	title.add_theme_font_override("font", Assets.FONT_HUD)
-	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_font_size_override("font_size", 14)
 	title.add_theme_color_override("font_color", icon_accent)
 	vb.add_child(title)
 
 	var val := Label.new()
 	val.add_theme_font_override("font", Assets.FONT_HUD)
-	val.add_theme_font_size_override("font_size", 26)
-	val.add_theme_color_override("font_color", Color.WHITE)
+	val.add_theme_font_size_override("font_size", 24)
+	val.add_theme_color_override("font_color", Color(1.0, 0.98, 0.95))
 	vb.add_child(val)
 
 	var sub := Label.new()
 	sub.add_theme_font_override("font", Assets.FONT_HUD)
-	sub.add_theme_font_size_override("font_size", 13)
-	sub.add_theme_color_override("font_color", Color(0.72, 0.78, 0.88))
+	sub.add_theme_font_size_override("font_size", 12)
+	sub.add_theme_color_override("font_color", Color(0.72, 0.80, 0.90))
 	vb.add_child(sub)
 
 	return [pc, val, sub]
@@ -1551,109 +1638,126 @@ func _build_results() -> void:
 	var r := _panel_center()
 	results_box = r[0]
 	var res_root: VBoxContainer = r[1]
-	res_root.add_theme_constant_override("separation", 8)
+	res_root.add_theme_constant_override("separation", 10)
 
-	# 1. Top Stage Chip & Stars Bar
-	var top_hbox := HBoxContainer.new()
-	top_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	top_hbox.add_theme_constant_override("separation", 16)
-	res_root.add_child(top_hbox)
+	var pc_main := results_box.get_child(0) as PanelContainer
+	if pc_main != null:
+		var psb := StyleBoxFlat.new()
+		psb.bg_color = Color(0.04, 0.05, 0.11, 0.95)
+		psb.border_width_left = 2; psb.border_width_top = 2; psb.border_width_right = 2; psb.border_width_bottom = 2
+		psb.border_color = Color(0.2, 0.85, 1.0, 0.75)
+		psb.set_corner_radius_all(14)
+		psb.set_content_margin_all(20)
+		pc_main.add_theme_stylebox_override("panel", psb)
+
+	# Split container: HBox in landscape (side-by-side decks), VBox in portrait (stacked)
+	res_split_box = BoxContainer.new()
+	res_split_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	res_split_box.add_theme_constant_override("separation", 20)
+	res_root.add_child(res_split_box)
+
+	# Left Hero Deck: Stage, Heading, Giant Rank Emblem, Stars, Record badge
+	res_left_deck = VBoxContainer.new()
+	res_left_deck.alignment = BoxContainer.ALIGNMENT_CENTER
+	res_left_deck.add_theme_constant_override("separation", 12)
+	res_split_box.add_child(res_left_deck)
 
 	res_chip_stage = Label.new()
 	res_chip_stage.add_theme_font_override("font", Assets.FONT_HUD)
-	res_chip_stage.add_theme_font_size_override("font_size", 18)
+	res_chip_stage.add_theme_font_size_override("font_size", 16)
 	res_chip_stage.add_theme_color_override("font_color", Color(0.3, 0.9, 1.0))
 	var chip_sb := StyleBoxFlat.new()
-	chip_sb.bg_color = Color(0.08, 0.12, 0.22, 0.80)
+	chip_sb.bg_color = Color(0.08, 0.12, 0.22, 0.85)
 	chip_sb.border_width_left = 1; chip_sb.border_width_top = 1; chip_sb.border_width_right = 1; chip_sb.border_width_bottom = 1
-	chip_sb.border_color = Color(0.2, 0.8, 1.0, 0.5)
+	chip_sb.border_color = Color(0.2, 0.85, 1.0, 0.6)
 	chip_sb.set_corner_radius_all(8)
 	chip_sb.set_content_margin_all(6)
 	res_chip_stage.add_theme_stylebox_override("normal", chip_sb)
-	top_hbox.add_child(res_chip_stage)
-
-	res_stars = HBoxContainer.new()
-	res_stars.alignment = BoxContainer.ALIGNMENT_CENTER
-	res_stars.add_theme_constant_override("separation", 6)
-	top_hbox.add_child(res_stars)
-	for i in 3:
-		var stx := TextureRect.new()
-		stx.texture = Art.UI.star_empty_200
-		stx.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		stx.custom_minimum_size = Vector2(44, 44)
-		res_stars.add_child(stx)
-
-	# 2. Main Title Row: Heading + Rank Box + New Record Badge
-	res_header_row = HBoxContainer.new()
-	res_header_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	res_header_row.add_theme_constant_override("separation", 18)
-	res_root.add_child(res_header_row)
+	res_chip_stage.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	res_left_deck.add_child(res_chip_stage)
 
 	lbl_result_heading = Label.new()
 	lbl_result_heading.text = ""
 	lbl_result_heading.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_result_heading.add_theme_font_size_override("font_size", 48)
+	lbl_result_heading.add_theme_font_size_override("font_size", 44)
 	lbl_result_heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl_result_heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	lbl_result_heading.autowrap_mode = TextServer.AUTOWRAP_OFF
-	lbl_result_heading.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_ink(lbl_result_heading)
-	res_header_row.add_child(lbl_result_heading)
+	res_left_deck.add_child(lbl_result_heading)
 
 	rank_box = PanelContainer.new()
 	var rank_style := StyleBoxFlat.new()
-	rank_style.bg_color = Color(0.06, 0.05, 0.16, 0.94)
+	rank_style.bg_color = Color(0.05, 0.06, 0.14, 0.95)
 	rank_style.border_width_left = 2; rank_style.border_width_top = 2; rank_style.border_width_right = 2; rank_style.border_width_bottom = 2
 	rank_style.border_color = Color(0.18, 0.88, 1.0)
-	rank_style.set_corner_radius_all(10)
-	rank_style.set_content_margin_all(6)
+	rank_style.set_corner_radius_all(14)
+	rank_style.set_content_margin_all(8)
 	rank_box.add_theme_stylebox_override("panel", rank_style)
-	rank_box.custom_minimum_size = Vector2(100, 48)
 	rank_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	rank_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 
-	var rk_vb := HBoxContainer.new()
+	var rk_vb := VBoxContainer.new()
 	rk_vb.alignment = BoxContainer.ALIGNMENT_CENTER
-	rk_vb.add_theme_constant_override("separation", 6)
+	rk_vb.add_theme_constant_override("separation", 2)
 	rank_box.add_child(rk_vb)
 
 	var lbl_rk_title := Label.new()
-	lbl_rk_title.text = "評級"
+	lbl_rk_title.text = "◆ 評級 GRADE ◆"
 	lbl_rk_title.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_rk_title.add_theme_font_size_override("font_size", 16)
-	lbl_rk_title.add_theme_color_override("font_color", Color(0.7, 0.88, 1.0))
+	lbl_rk_title.add_theme_font_size_override("font_size", 13)
+	lbl_rk_title.add_theme_color_override("font_color", Color(0.5, 0.82, 1.0))
+	lbl_rk_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rk_vb.add_child(lbl_rk_title)
 
 	lbl_rank = Label.new()
 	lbl_rank.text = "S"
 	lbl_rank.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_rank.add_theme_font_size_override("font_size", 30)
+	lbl_rank.add_theme_font_size_override("font_size", 54)
 	lbl_rank.add_theme_color_override("font_outline_color", Color(0.04, 0.03, 0.08, 0.95))
-	lbl_rank.add_theme_constant_override("outline_size", 6)
+	lbl_rank.add_theme_constant_override("outline_size", 8)
 	lbl_rank.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rk_vb.add_child(lbl_rank)
 
-	res_header_row.add_child(rank_box)
+	res_left_deck.add_child(rank_box)
+
+	res_stars = HBoxContainer.new()
+	res_stars.alignment = BoxContainer.ALIGNMENT_CENTER
+	res_stars.add_theme_constant_override("separation", 8)
+	res_left_deck.add_child(res_stars)
+	for i in 3:
+		var stx := TextureRect.new()
+		stx.texture = Art.UI.star_empty_200
+		stx.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		stx.custom_minimum_size = Vector2(48, 48)
+		res_stars.add_child(stx)
 
 	res_badge = TextureRect.new()
 	res_badge.texture = Art.UI.badge_new_record
 	res_badge.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	res_badge.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	res_badge.custom_minimum_size = Vector2(120, 48)
+	res_badge.custom_minimum_size = Vector2(130, 44)
 	res_badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	res_badge.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var nl := Label.new(); nl.text = "新紀錄"
-	nl.add_theme_font_override("font", Assets.FONT_HUD); nl.add_theme_font_size_override("font_size", 20)
+	nl.add_theme_font_override("font", Assets.FONT_HUD); nl.add_theme_font_size_override("font_size", 18)
 	nl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; nl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_ink(nl)
 	res_badge.add_child(nl); _place_px(nl, 0, 0, 1, 0.95, 0, 0, 0, 0)
-	res_header_row.add_child(res_badge)
+	res_left_deck.add_child(res_badge)
 
-	# 3. 4-Card Metrics Grid
+	# Right Telemetry Deck: 4 Stat Cards, Weak Kana, Knowledge, Action Buttons
+	res_right_deck = VBoxContainer.new()
+	res_right_deck.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	res_right_deck.add_theme_constant_override("separation", 10)
+	res_split_box.add_child(res_right_deck)
+
 	res_cards_grid = GridContainer.new()
 	res_cards_grid.columns = 2
 	res_cards_grid.add_theme_constant_override("h_separation", 10)
 	res_cards_grid.add_theme_constant_override("v_separation", 8)
 	res_cards_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	res_root.add_child(res_cards_grid)
+	res_right_deck.add_child(res_cards_grid)
 
 	var c_time := _make_cyber_stat_card("◎ 結算用時", Color(0.2, 0.85, 1.0))
 	res_card_time = c_time[0]; lbl_card_time_val = c_time[1]; lbl_card_time_sub = c_time[2]
@@ -1671,7 +1775,6 @@ func _build_results() -> void:
 	res_card_pts = c_pts[0]; lbl_card_pts_val = c_pts[1]; lbl_card_pts_sub = c_pts[2]
 	res_cards_grid.add_child(res_card_pts)
 
-	# 4. Weak Kana Tiles Container
 	res_weak_box = PanelContainer.new()
 	var wsb := StyleBoxFlat.new()
 	wsb.bg_color = Color(0.08, 0.05, 0.10, 0.85)
@@ -1681,7 +1784,7 @@ func _build_results() -> void:
 	wsb.set_content_margin_all(8)
 	res_weak_box.add_theme_stylebox_override("panel", wsb)
 	res_weak_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	res_root.add_child(res_weak_box)
+	res_right_deck.add_child(res_weak_box)
 
 	var weak_vb := HBoxContainer.new()
 	weak_vb.alignment = BoxContainer.ALIGNMENT_BEGIN
@@ -1691,7 +1794,7 @@ func _build_results() -> void:
 	var lbl_weak_title := Label.new()
 	lbl_weak_title.text = "▲ 待強化假名："
 	lbl_weak_title.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_weak_title.add_theme_font_size_override("font_size", 15)
+	lbl_weak_title.add_theme_font_size_override("font_size", 14)
 	lbl_weak_title.add_theme_color_override("font_color", Color(1.0, 0.5, 0.4))
 	lbl_weak_title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	weak_vb.add_child(lbl_weak_title)
@@ -1702,7 +1805,6 @@ func _build_results() -> void:
 	res_weak_tiles.add_theme_constant_override("v_separation", 6)
 	weak_vb.add_child(res_weak_tiles)
 
-	# 5. Knowledge Capsule
 	res_knowledge_box = PanelContainer.new()
 	var knsb := StyleBoxFlat.new()
 	knsb.bg_color = Color(0.05, 0.08, 0.16, 0.85)
@@ -1712,22 +1814,21 @@ func _build_results() -> void:
 	knsb.set_content_margin_all(8)
 	res_knowledge_box.add_theme_stylebox_override("panel", knsb)
 	res_knowledge_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	res_root.add_child(res_knowledge_box)
+	res_right_deck.add_child(res_knowledge_box)
 
 	lbl_res_knowledge = Label.new()
 	lbl_res_knowledge.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_res_knowledge.add_theme_font_size_override("font_size", 14)
+	lbl_res_knowledge.add_theme_font_size_override("font_size", 13)
 	lbl_res_knowledge.add_theme_color_override("font_color", Color(0.8, 0.92, 1.0))
 	lbl_res_knowledge.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	res_knowledge_box.add_child(lbl_res_knowledge)
 
-	# 6. Action Buttons Bar
 	result_actions = GridContainer.new()
 	result_actions.columns = 4
 	result_actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	result_actions.add_theme_constant_override("h_separation", 10)
 	result_actions.add_theme_constant_override("v_separation", 8)
-	res_root.add_child(result_actions)
+	res_right_deck.add_child(result_actions)
 
 	btn_next = _button(I18n.t("BTN_NEXT", "下一關"))
 	btn_review = _button(I18n.t("BTN_REVIEW", "錯題練習"))
@@ -1825,47 +1926,95 @@ func _layout_result_cards() -> void:
 	var landscape := viewport_size.x >= viewport_size.y
 	var insets: Dictionary = get_safe_insets()
 	var touch_height := 56.0 if landscape else 50.0
-	var max_w: float = minf(960.0 if landscape else 620.0, viewport_size.x - 48.0 - float(insets.left) - float(insets.right))
+	var available_w: float = viewport_size.x - 48.0 - float(insets.left) - float(insets.right)
+	var panel_w: float = clampf(available_w * 0.72, 920.0, 1680.0) if landscape else minf(available_w, 720.0)
 
 	if is_instance_valid(results_box) and results_box.get_child_count() > 0:
 		var pc := results_box.get_child(0) as Control
 		if pc != null:
-			pc.custom_minimum_size.x = max_w
+			pc.custom_minimum_size.x = panel_w
 
-	if is_instance_valid(lbl_result_heading):
-		lbl_result_heading.add_theme_font_size_override("font_size", 48 if landscape else 38)
-	if is_instance_valid(rank_box):
-		rank_box.custom_minimum_size = Vector2(90, 52) if landscape else Vector2(80, 46)
-		rank_box.pivot_offset = rank_box.custom_minimum_size * 0.5
-	if is_instance_valid(lbl_rank):
-		lbl_rank.add_theme_font_size_override("font_size", 30 if landscape else 24)
-	if is_instance_valid(res_badge):
-		res_badge.custom_minimum_size = Vector2(120, 44) if landscape else Vector2(100, 38)
-		if res_badge.get_child_count() > 0:
-			(res_badge.get_child(0) as Label).add_theme_font_size_override("font_size", 20 if landscape else 16)
+	if is_instance_valid(res_split_box):
+		res_split_box.vertical = not landscape
+		res_split_box.add_theme_constant_override("separation", 24 if landscape else 10)
 
-	if is_instance_valid(res_cards_grid):
-		res_cards_grid.columns = 2
-		var card_w := (max_w - 70.0) * 0.5
-		var card_h := 82.0 if landscape else 76.0
-		for card in [res_card_time, res_card_acc, res_card_combo, res_card_pts]:
-			if card != null and is_instance_valid(card):
-				card.custom_minimum_size = Vector2(card_w, card_h)
-
-	if is_instance_valid(result_actions):
-		var action_count := result_actions.get_children().filter(func(b): return b.visible).size()
-		result_actions.columns = action_count if (landscape and action_count <= 4) else 2
-		var btn_w := (max_w - 60.0) / float(maxi(1, result_actions.columns)) - 10.0
-		for button in [btn_retry, btn_next, btn_review, btn_select, btn_save_retry, btn_kata_next]:
-			if button != null and is_instance_valid(button):
-				button.custom_minimum_size = Vector2(btn_w, touch_height)
-				button.add_theme_font_size_override("font_size", 22 if landscape else 18)
+	if landscape:
+		var left_w := panel_w * 0.35
+		var right_w := panel_w * 0.65 - 24.0
+		if is_instance_valid(res_left_deck):
+			res_left_deck.custom_minimum_size = Vector2(left_w, 0)
+		if is_instance_valid(res_right_deck):
+			res_right_deck.custom_minimum_size = Vector2(right_w, 0)
+		if is_instance_valid(lbl_result_heading):
+			lbl_result_heading.add_theme_font_size_override("font_size", 42)
+		if is_instance_valid(rank_box):
+			rank_box.custom_minimum_size = Vector2(160, 120)
+			rank_box.pivot_offset = rank_box.custom_minimum_size * 0.5
+		if is_instance_valid(lbl_rank):
+			lbl_rank.add_theme_font_size_override("font_size", 54)
+		if is_instance_valid(res_badge):
+			res_badge.custom_minimum_size = Vector2(140, 48)
+			if res_badge.get_child_count() > 0:
+				(res_badge.get_child(0) as Label).add_theme_font_size_override("font_size", 20)
+		if is_instance_valid(res_stars):
+			for st in res_stars.get_children():
+				if st is TextureRect:
+					st.custom_minimum_size = Vector2(52, 52)
+		if is_instance_valid(res_cards_grid):
+			res_cards_grid.columns = 2
+			var card_w := (right_w - 14.0) * 0.5
+			var card_h := 88.0
+			for card in [res_card_time, res_card_acc, res_card_combo, res_card_pts]:
+				if card != null and is_instance_valid(card):
+					card.custom_minimum_size = Vector2(card_w, card_h)
+		if is_instance_valid(result_actions):
+			var action_count := result_actions.get_children().filter(func(b): return b.visible).size()
+			result_actions.columns = action_count if action_count <= 4 else 2
+			var btn_w := (right_w - float(result_actions.columns - 1) * 10.0) / float(maxi(1, result_actions.columns))
+			for button in [btn_retry, btn_next, btn_review, btn_select, btn_save_retry, btn_kata_next]:
+				if button != null and is_instance_valid(button):
+					button.custom_minimum_size = Vector2(btn_w, touch_height)
+					button.add_theme_font_size_override("font_size", 20)
+	else:
+		if is_instance_valid(res_left_deck):
+			res_left_deck.custom_minimum_size = Vector2.ZERO
+		if is_instance_valid(res_right_deck):
+			res_right_deck.custom_minimum_size = Vector2.ZERO
+		if is_instance_valid(lbl_result_heading):
+			lbl_result_heading.add_theme_font_size_override("font_size", 36)
+		if is_instance_valid(rank_box):
+			rank_box.custom_minimum_size = Vector2(100, 48)
+			rank_box.pivot_offset = rank_box.custom_minimum_size * 0.5
+		if is_instance_valid(lbl_rank):
+			lbl_rank.add_theme_font_size_override("font_size", 30)
+		if is_instance_valid(res_badge):
+			res_badge.custom_minimum_size = Vector2(100, 38)
+			if res_badge.get_child_count() > 0:
+				(res_badge.get_child(0) as Label).add_theme_font_size_override("font_size", 16)
+		if is_instance_valid(res_stars):
+			for st in res_stars.get_children():
+				if st is TextureRect:
+					st.custom_minimum_size = Vector2(40, 40)
+		if is_instance_valid(res_cards_grid):
+			res_cards_grid.columns = 2
+			var card_w := (panel_w - 40.0) * 0.5
+			var card_h := 76.0
+			for card in [res_card_time, res_card_acc, res_card_combo, res_card_pts]:
+				if card != null and is_instance_valid(card):
+					card.custom_minimum_size = Vector2(card_w, card_h)
+		if is_instance_valid(result_actions):
+			result_actions.columns = 2
+			var btn_w := (panel_w - 40.0 - 10.0) * 0.5
+			for button in [btn_retry, btn_next, btn_review, btn_select, btn_save_retry, btn_kata_next]:
+				if button != null and is_instance_valid(button):
+					button.custom_minimum_size = Vector2(btn_w, touch_height)
+					button.add_theme_font_size_override("font_size", 18)
 
 	for button in [btn_review_back, btn_review_next, btn_review_replay]:
 		if button != null and is_instance_valid(button):
 			button.custom_minimum_size = Vector2(260.0 if landscape else 200.0, touch_height)
 			button.add_theme_font_size_override("font_size", 22 if landscape else 18)
-	var choice_width := minf(220.0 if landscape else 180.0, max_w / lane_count - 16.0)
+	var choice_width := minf(220.0 if landscape else 180.0, panel_w / lane_count - 16.0)
 	for button in review_choices:
 		if button != null and is_instance_valid(button):
 			button.custom_minimum_size = Vector2(choice_width, touch_height)
@@ -2119,7 +2268,11 @@ func _refresh_mode_buttons() -> void:
 		btn_mode_pause_step.add_theme_color_override("font_color", Color(1.0, 0.96, 0.88) if speed_mode == "step" else Color(0.7, 0.72, 0.8))
 		(btn_mode_pause_race if speed_mode == "race" else btn_mode_pause_step).button_pressed = true
 	(btn_mode_race if speed_mode == "race" else btn_mode_step).button_pressed = true
-	lbl_settings_mode.text = I18n.t("SETTINGS_CURRENT_MODE", "選用中：%s模式") % mode_name()
+	lbl_settings_mode.text = "◆ 系統設定 · 選用中：%s模式 ◆" % mode_name()
+	if btn_mode_race != null:
+		btn_mode_race.text = ("● 賽車模式 (RACING) · 已選用\n長按加速／煞車 · 支援巡航定速" if speed_mode == "race" else "○ 賽車模式 (RACING)\n長按加速／煞車 · 支援巡航定速")
+	if btn_mode_step != null:
+		btn_mode_step.text = ("● 點放模式 (TAP-STEP) · 已選用\n點一下 ±5 km/h · 節奏精準控速" if speed_mode == "step" else "○ 點放模式 (TAP-STEP)\n點一下 ±5 km/h · 節奏精準控速")
 	_layout_select_scroll()
 
 func show_settings() -> void:
@@ -2132,7 +2285,7 @@ func show_settings() -> void:
 	_update_vibration_button()
 	_update_hit_pitch_button()
 	if btn_lang != null:
-		btn_lang.text = I18n.t("LANG_BUTTON", "語言：%s" % I18n.LOCALE_NAMES.get(I18n.current_locale, I18n.current_locale))
+		btn_lang.text = "◎ 遊戲語言\n%s" % I18n.LOCALE_NAMES.get(I18n.current_locale, I18n.current_locale)
 	_wire_settings_focus()
 	_update_pad_bar()
 	_update_title_prompts()
@@ -2144,15 +2297,15 @@ func set_language(loc: String, persist := true) -> void:
 		save.set_setting("locale", loc)
 		_persist_progress()
 	if btn_lang != null:
-		btn_lang.text = I18n.t("LANG_BUTTON", "語言：%s" % I18n.LOCALE_NAMES.get(loc, loc))
+		btn_lang.text = "◎ 遊戲語言\n%s" % I18n.LOCALE_NAMES.get(loc, loc)
 	if lbl_settings_mode != null:
-		lbl_settings_mode.text = I18n.t("SETTINGS_CURRENT_MODE", "選用中：%s模式") % mode_name()
+		lbl_settings_mode.text = "◆ 系統設定 · 選用中：%s模式 ◆" % mode_name()
 	if btn_mode_race != null:
-		btn_mode_race.text = I18n.t("SETTINGS_MODE_RACE", "賽車：按住加速／煞車・可定速")
+		btn_mode_race.text = ("● 賽車模式 (RACING) · 已選用\n長按加速／煞車 · 支援巡航定速" if speed_mode == "race" else "○ 賽車模式 (RACING)\n長按加速／煞車 · 支援巡航定速")
 	if btn_mode_step != null:
-		btn_mode_step.text = I18n.t("SETTINGS_MODE_STEP", "點放模式：點一下 ±5 km/h")
+		btn_mode_step.text = ("● 點放模式 (TAP-STEP) · 已選用\n點一下 ±5 km/h · 節奏精準控速" if speed_mode == "step" else "○ 點放模式 (TAP-STEP)\n點一下 ±5 km/h · 節奏精準控速")
 	if btn_settings_back != null:
-		btn_settings_back.text = I18n.t("BTN_SETTINGS_BACK", "返回")
+		btn_settings_back.text = I18n.t("BTN_SETTINGS_BACK", "返回確認")
 	_update_vol_buttons()
 	_update_vibration_button()
 	_update_hit_pitch_button()
@@ -2207,17 +2360,16 @@ func hide_settings() -> void:
 
 func _update_vibration_button() -> void:
 	if btn_vibration != null and is_instance_valid(btn_vibration):
-		var state_str := I18n.t("STATE_ON", "開啟") if vibration_enabled else I18n.t("STATE_OFF", "關閉")
-		btn_vibration.text = I18n.t("VIBRATION_BTN", "震動：%s") % state_str
+		var state_str := "開啟 ON" if vibration_enabled else "關閉 OFF"
+		btn_vibration.text = "▲ 震動反饋\n%s" % state_str
 
 func _update_hit_pitch_button() -> void:
 	if btn_hit_pitch != null and is_instance_valid(btn_hit_pitch):
 		var mode := str(save.get_setting("hit_pitch_mode", "pentatonic"))
-		var label_key := "HIT_PITCH_PENTATONIC"
-		if mode == "random": label_key = "HIT_PITCH_RANDOM"
-		elif mode == "fixed": label_key = "HIT_PITCH_FIXED"
-		var mode_name := I18n.t(label_key, "五聲音階")
-		btn_hit_pitch.text = I18n.t("SETTINGS_HIT_PITCH", "音階：%s") % mode_name
+		var mode_name := "五聲音階"
+		if mode == "random": mode_name = "隨機音階"
+		elif mode == "fixed": mode_name = "固定音高"
+		btn_hit_pitch.text = "◆ 打擊音階\n%s" % mode_name
 
 func _wire_settings_focus() -> void:
 	if btn_mode_race == null or btn_mode_step == null or btn_vol_bgm == null:
@@ -4015,7 +4167,7 @@ func _layout_select_scroll() -> void:
 	var insets: Dictionary = get_safe_insets()
 	var footer_height := maxf(90.0, short_side * 0.113)
 	if is_instance_valid(select_scroll):
-		select_scroll.custom_minimum_size.y = maxf(140.0, view.y - 600.0 * UI - (footer_height - 90.0) - float(insets.top) - float(insets.bottom))
+		select_scroll.custom_minimum_size.y = maxf(140.0, view.y - 620.0 * UI - (footer_height - 90.0) - float(insets.top) - float(insets.bottom))
 	if not is_instance_valid(btn_tutorial) or not btn_tutorial.is_inside_tree():
 		return
 	var font_size := roundi(short_side * 0.034)
@@ -4133,7 +4285,21 @@ func show_select() -> void:
 	level_buttons.clear()
 	var insets: Dictionary = get_safe_insets()
 	var vs: Vector2 = get_viewport().get_visible_rect().size
-	var w: float = minf(560.0 * UI, vs.x - 90.0 * UI - float(insets.left) - float(insets.right))
+	var landscape := vs.x >= vs.y
+	var available_w: float = vs.x - 48.0 - float(insets.left) - float(insets.right)
+	var w: float = clampf(available_w * 0.54, 760.0, 960.0) if landscape else clampf(available_w, 640.0, 840.0)
+
+	if select_box != null and select_box.get_child_count() > 0:
+		var pc := select_box.get_child(0) as PanelContainer
+		if pc != null:
+			var ssb := StyleBoxFlat.new()
+			ssb.bg_color = Color(0.03, 0.04, 0.09, 0.95)
+			ssb.border_width_left = 2; ssb.border_width_top = 2; ssb.border_width_right = 2; ssb.border_width_bottom = 2
+			ssb.border_color = Color(0.18, 0.85, 1.0, 0.65)
+			ssb.set_corner_radius_all(14)
+			ssb.set_content_margin_all(16)
+			pc.add_theme_stylebox_override("panel", ssb)
+			pc.custom_minimum_size.x = w
 
 	var rank_info: Dictionary = save.get_player_rank()
 	var daily_info: Dictionary = save.check_daily_status()
@@ -4141,9 +4307,9 @@ func show_select() -> void:
 	# 1. Top HUD Profile Header Bar
 	var top_hud := PanelContainer.new()
 	var th_sb := StyleBoxFlat.new()
-	th_sb.bg_color = Color(0.04, 0.05, 0.12, 0.92)
+	th_sb.bg_color = Color(0.04, 0.06, 0.14, 0.95)
 	th_sb.border_width_left = 2; th_sb.border_width_top = 2; th_sb.border_width_right = 2; th_sb.border_width_bottom = 2
-	th_sb.border_color = Color(0.2, 0.85, 1.0, 0.45)
+	th_sb.border_color = Color(0.2, 0.85, 1.0, 0.55)
 	th_sb.set_corner_radius_all(10)
 	th_sb.set_content_margin_all(8)
 	top_hud.add_theme_stylebox_override("panel", th_sb)
@@ -4152,38 +4318,38 @@ func show_select() -> void:
 
 	var th_hbox := HBoxContainer.new()
 	th_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	th_hbox.add_theme_constant_override("separation", 14)
+	th_hbox.add_theme_constant_override("separation", 16)
 	top_hud.add_child(th_hbox)
 
 	var lbl_rank := Label.new()
-	lbl_rank.text = "%s %s" % [rank_info.badge, rank_info.title]
+	lbl_rank.text = "◆ %s %s" % [rank_info.badge, rank_info.title]
 	lbl_rank.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_rank.add_theme_font_size_override("font_size", int(20 * UI))
+	lbl_rank.add_theme_font_size_override("font_size", int(18 * UI))
 	lbl_rank.add_theme_color_override("font_color", rank_info.color)
 	th_hbox.add_child(lbl_rank)
 
 	var title := Label.new()
-	title.text = I18n.t("TITLE_SELECT", "選關")
+	title.text = "【 %s 】" % I18n.t("TITLE_SELECT", "任務選關 MISSION SELECT")
 	title.add_theme_font_override("font", Assets.FONT_HUD)
-	title.add_theme_font_size_override("font_size", int(24 * UI))
-	title.add_theme_color_override("font_color", Color(1.0, 0.95, 0.8))
+	title.add_theme_font_size_override("font_size", int(20 * UI))
+	title.add_theme_color_override("font_color", Color(1.0, 0.95, 0.85))
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	th_hbox.add_child(title)
 
 	lbl_points = Label.new()
-	lbl_points.text = I18n.t("POINTS_UNREADABLE", "讀不到紀錄") if save.unreadable else (I18n.t("POINTS_TOTAL", "總點數 %d") % save.points())
+	lbl_points.text = I18n.t("POINTS_UNREADABLE", "讀不到紀錄") if save.unreadable else (I18n.t("POINTS_TOTAL", "◆ 總點數 %d") % save.points())
 	if progress_pending:
 		lbl_points.text += I18n.t("POINTS_PENDING", "・未存檔")
 	lbl_points.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_points.add_theme_font_size_override("font_size", int(18 * UI))
+	lbl_points.add_theme_font_size_override("font_size", int(17 * UI))
 	lbl_points.add_theme_color_override("font_color", Color(0.85, 0.55, 1.0))
 	th_hbox.add_child(lbl_points)
 
 	var lbl_streak := Label.new()
 	lbl_streak.text = "★ %s %d %s" % [I18n.t("DAILY_STREAK_PRE", "連續"), daily_info.streak, I18n.t("DAILY_STREAK_POST", "天")]
 	lbl_streak.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_streak.add_theme_font_size_override("font_size", int(18 * UI))
+	lbl_streak.add_theme_font_size_override("font_size", int(17 * UI))
 	lbl_streak.add_theme_color_override("font_color", Color(1.0, 0.65, 0.2))
 	th_hbox.add_child(lbl_streak)
 
@@ -4251,8 +4417,8 @@ func show_select() -> void:
 		_art_button(b, "tab_inactive", 32)
 		b.add_theme_stylebox_override("pressed", _tex_style("tab_active", 32))
 		b.add_theme_stylebox_override("hover_pressed", _tex_style("tab_active", 32))
-		b.custom_minimum_size = Vector2(w * 0.5 - 5, w * 0.5 * 110.0 / 470.0)
-		b.add_theme_font_size_override("font_size", int(30 * UI))
+		b.custom_minimum_size = Vector2(w * 0.5 - 5, clampf(w * 0.5 * 110.0 / 470.0, 48.0 * UI, 64.0 * UI))
+		b.add_theme_font_size_override("font_size", int(24 * UI))
 		tabs.add_child(b)
 	btn_tab_kata.disabled = not kata_open
 	if btn_tab_kata.disabled:
@@ -4271,8 +4437,8 @@ func show_select() -> void:
 	for d in cfg.get("distances", {}).get("order", ["short", "mid", "long"]):
 		var db := _button(distance_name(d))
 		_art_button(db, "dist_selected" if d == distance else "dist_unselected", 32)
-		db.custom_minimum_size = Vector2(w / 3.0 - 8, (w / 3.0) * 130.0 / 300.0)
-		db.add_theme_font_size_override("font_size", int(28 * UI))
+		db.custom_minimum_size = Vector2(w / 3.0 - 8, clampf((w / 3.0) * 110.0 / 300.0, 46.0 * UI, 58.0 * UI))
+		db.add_theme_font_size_override("font_size", int(22 * UI))
 		db.toggle_mode = true
 		db.button_group = distance_group
 		db.button_pressed = d == distance
@@ -4311,30 +4477,30 @@ func show_select() -> void:
 		var E := LevelDB.effective(cfg, levels, i, distance)
 		var unlocked := _can_choose_level(i, E)
 		var rec: Dictionary = save.get_record(id, distance)
-		var txt := "%s  %d%s" % [str(L.get("name", id)), int(E.target_correct), I18n.t("QUESTIONS_UNIT", "題")]
+		var txt := "      %s  ·  %d%s" % [str(L.get("name", id)), int(E.target_correct), I18n.t("QUESTIONS_UNIT", "題")]
 		if bool(E.voice_locked):
-			txt += "  " + I18n.t("STAGE_MISSING_VOICE", "缺語音")
+			txt += "    " + I18n.t("STAGE_MISSING_VOICE", "缺語音")
 		elif not unlocked:
-			txt += "  " + I18n.t("STAGE_LOCKED", "鎖定")
+			txt += "    " + I18n.t("STAGE_LOCKED", "◆ 鎖定")
 		elif float(rec.get("best_time", -1.0)) >= 0.0:
-			txt += "  %s %.1fs" % [_stars_text(int(rec.get("best_stars", 0))), float(rec.best_time)]
+			txt += "    %s  %.1fs" % [_stars_text(int(rec.get("best_stars", 0))), float(rec.best_time)]
 		elif bool(rec.get("cleared", false)):
-			txt += "  " + I18n.t("STAGE_CLEARED", "通過")
+			txt += "    " + I18n.t("STAGE_CLEARED", "通過")
 		var b := _button(txt)
 		var typ := str(L.get("type", "normal"))
 		var row_art := "stage_row_locked" if not unlocked else ("stage_row_boss" if typ != "normal" else ("stage_row_cleared" if save.cleared_any(id) else "stage_row_normal"))
-		var rh := (w - 20) * 180.0 / 960.0
+		var rh := clampf((w - 20) * 125.0 / 960.0, 72.0 * UI, 96.0 * UI)
 		_art_button(b, row_art, 40, rh * 0.85)
 		b.add_theme_stylebox_override("pressed", _tex_style("stage_row_selected", 40, rh * 0.85))
 		b.add_theme_stylebox_override("disabled", _tex_style("stage_row_locked", 40, rh * 0.85))
 		b.custom_minimum_size = Vector2(w - 20, rh)
-		b.add_theme_font_size_override("font_size", int(24 * UI))
-		# kana badge (left 126x126 of the row) - Zen Maru label, not baked into the art
+		b.add_theme_font_size_override("font_size", int(22 * UI))
+		# kana badge (left 126x126 of the row) - Zen Maru label with glowing tile background
 		var badge := Label.new()
 		var rws: Array = L.get("rows", [])
-		badge.text = "" if not unlocked else (str(rws[0]).substr(0, 1) if rws.size() > 0 and typ == "normal" else "")
+		badge.text = "" if not unlocked else (str(rws[0]).substr(0, 1) if rws.size() > 0 and typ == "normal" else ("★" if typ != "normal" else ""))
 		badge.add_theme_font_override("font", Art.FONT_KANA)
-		badge.add_theme_font_size_override("font_size", int(rh * 0.42))
+		badge.add_theme_font_size_override("font_size", int(rh * 0.44))
 		badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		badge.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -4599,9 +4765,12 @@ func _set_bus_vol(bus_name: String, linear: float) -> void:
 
 func _vol_label(prefix: String, key: String, default_val: float) -> String:
 	var v := float(save.get_setting(key, default_val))
+	var pct := roundi(v * 100.0)
+	var filled := roundi(v * 5.0)
+	var meter := "■".repeat(filled) + "□".repeat(5 - filled)
 	if v <= 0.01:
-		return "%s：%s" % [prefix, I18n.t("VOL_MUTE", "靜音")]
-	return "%s：%d%%" % [prefix, roundi(v * 100.0)]
+		return "%s: 靜音\n[□□□□□]" % prefix
+	return "%s: %d%%\n[%s]" % [prefix, pct, meter]
 
 func _update_vol_buttons() -> void:
 	if btn_vol_bgm != null:
