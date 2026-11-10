@@ -54,7 +54,7 @@ func _process(_d: float) -> bool:
 				g.correct = 6
 				g._set_combo(6)
 				g.player_dist = 85.0
-				g._spawn_props()
+				g._update_view(0.0)
 			"cyber_combo_sfx":
 				g.reset_run()
 				g.save.equip_aura("crimson")
@@ -66,7 +66,7 @@ func _process(_d: float) -> bool:
 				g.correct = 15
 				g._set_combo(15)
 				g.player_dist = 140.0
-				g._spawn_props()
+				g._update_view(0.0)
 				g._spawn_shockwave(g.player.global_position + Vector3(0, 1.2, -1.0), Color(1.0, 0.88, 0.3), 320.0)
 				g._screen_flash(Color(1.0, 0.92, 0.4, 0.16), 0.12)
 

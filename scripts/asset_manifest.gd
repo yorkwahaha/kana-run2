@@ -122,6 +122,21 @@ const SFX := {
 	"heal": preload("res://audio/sfx/heal.mp3"),
 }
 
+# Pitch-shifted offline at the original duration. Runtime pitch_scale also changes tempo.
+const HIT_TONES := [
+	SFX.shatter,
+	preload("res://audio/sfx/shatter_02.ogg"),
+	preload("res://audio/sfx/shatter_03.ogg"),
+	preload("res://audio/sfx/shatter_04.ogg"),
+	preload("res://audio/sfx/shatter_05.ogg"),
+	preload("res://audio/sfx/shatter_06.ogg"),
+	preload("res://audio/sfx/shatter_07.ogg"),
+	preload("res://audio/sfx/shatter_08.ogg"),
+	preload("res://audio/sfx/shatter_09.ogg"),
+	preload("res://audio/sfx/shatter_10.ogg"),
+]
+const SHIELD_BREAK := preload("res://audio/sfx/shatter_shield.ogg")
+
 const MUSIC := {
 	"res://audio/music/dash.mp3": preload("res://audio/music/dash.mp3"),
 	"res://audio/music/hit.mp3": preload("res://audio/music/hit.mp3"),

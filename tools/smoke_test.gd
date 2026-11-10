@@ -367,7 +367,7 @@ func hp_tests(g) -> void:
 	var cfg: Dictionary = GameConfig.load_config()
 	check(int(cfg.hp.max_hp) == 100 and int(cfg.hp.wrong_damage) == 35 and int(cfg.hp.miss_damage) == 0, "config: HP 100, wrong -35, miss 0 by default")
 	g.set_level(0); g.reset_run(); g.start_run()
-	check(g.hp == 100 and g.max_hp == 100 and g.lbl_hp.text == "100 / 100", "run starts at 100 / 100")
+	check(g.hp == 100 and g.max_hp == 100 and g.lbl_hp.text == "HP  100 / 100", "run starts at 100 / 100")
 	check(g.music.stream is AudioStreamMP3 and g.music.stream.loop, "the default BGM loops during a long run")
 	var got := []
 	var cb := func(h, m, sh): got.append([h, m, sh])
@@ -375,7 +375,7 @@ func hp_tests(g) -> void:
 	g.ctrl.speed = 10.0
 	var p0: float = g.penalty
 	_answer(g, "wrong")
-	check(g.hp == 65 and g.lbl_hp.text == "65 / 100", "wrong hit = -35 HP")
+	check(g.hp == 65 and g.lbl_hp.text == "HP  65 / 100", "wrong hit = -35 HP")
 	check(is_equal_approx(g.penalty - p0, 2.0) and is_equal_approx(g.ctrl.speed, 5.0), "wrong hit still -2 s and speed halved")
 	check(got.size() >= 1 and got[-1][0] == 65, "hp_changed signal emitted")
 	check(g.hp_delayed > 65.0 and g.hp_chunk.offset_right > g.hp_fill.offset_right, "delayed red chunk stays visible right after the hit")
@@ -468,13 +468,13 @@ func mode_game_tests(g) -> void:
 	var pause_race: Button = g.btn_mode_pause_race
 	var pause_step: Button = g.btn_mode_pause_step
 	check(pause_race.is_visible_in_tree() and pause_step.is_visible_in_tree() and pause_step.button_pressed and not pause_race.button_pressed, "pause exposes two modes and selects only the current mode")
-	var step_style := pause_step.get_theme_stylebox("normal") as StyleBoxTexture
-	check(step_style != null and step_style.texture.resource_path.ends_with("mode_step_active.png"), "pause highlights the active step mode")
-	check(step_style == pause_step.get_theme_stylebox("hover") and step_style == pause_step.get_theme_stylebox("hover_pressed"), "pause step keeps its active art during hover and hover-press")
+	var step_style := pause_step.get_theme_stylebox("pressed") as StyleBoxFlat
+	check(step_style != null and step_style.border_color == g.AMBER, "pause highlights the active step mode")
+	check(step_style == pause_step.get_theme_stylebox("hover_pressed"), "pause step keeps its active treatment on hover-press")
 	pause_race.pressed.emit()
 	check(g.speed_mode == "race" and g.ctrl.mode == "race" and g.state == g.State.PAUSED and not g.ctrl.locked, "pause-menu switch to 賽車 applies (still paused, unlocked)")
-	var race_style := pause_race.get_theme_stylebox("hover_pressed") as StyleBoxTexture
-	check(pause_race.button_pressed and not pause_step.button_pressed and race_style != null and race_style.texture.resource_path.ends_with("mode_race_active.png"), "pause highlights only the chosen race mode even with a pointer over it")
+	var race_style := pause_race.get_theme_stylebox("hover_pressed") as StyleBoxFlat
+	check(pause_race.button_pressed and not pause_step.button_pressed and race_style != null and race_style.border_color == g.AMBER, "pause highlights only the chosen race mode even with a pointer over it")
 	g.ctrl.toggle_lock()
 	pause_race.pressed.emit()
 	check(g.ctrl.locked, "reselecting the active race mode preserves cruise lock")
@@ -540,7 +540,10 @@ func shop_tests(g) -> void:
 	check(s.buy_upgrade("shield_level", 2, 250), "buys shield upgrade Lv.1 for 250 pts")
 	check(s.get_upgrade_level("shield_level") == 1, "shield upgrade is now Lv.1")
 
-	# In-game integration
+	# In-game integration. Ranked runs ignore purchased gear until assist is on.
+	g.reset_run()
+	check(g.max_hp == 100 and g.shield == 0, "ranked runs ignore HP and shield upgrades")
+	g.save.set_setting("assist_power", true)
 	g.reset_run()
 	check(g.max_hp == 120 and g.hp == 120, "HP upgrade (+20) raises max HP to 120 on reset_run")
 	check(g.shield == 1, "starting shield upgrade grants 1 shield on reset_run")
@@ -560,6 +563,8 @@ func shop_tests(g) -> void:
 	g.take_damage(35) # absorbed by shield
 	g.take_damage(35) # reduced by 15%: 35 * 0.85 = 29.75 -> 30
 	check(g.hp == 90, "armor Lv.1 reduces 35 damage to 30 (120 -> 90)")
+	g.save.set_setting("assist_power", false)
+	g.reset_run()
 
 	# Shop UI dialog tests
 	g.show_select()
@@ -601,14 +606,18 @@ func achievement_tests(g) -> void:
 	check(not s.is_achievement_unlocked("first_step"), "first_step locked initially")
 	check(not s.is_achievement_claimed("first_step"), "first_step unclaimed initially")
 
-	# Trigger unlock via check_achievement
+	# Unlock during play and show it on the recap.
+	g.reset_run(); g.start_run()
 	g.check_achievement("first_step")
 	check(s.is_achievement_unlocked("first_step"), "first_step unlocked after check_achievement")
 	check(not s.is_achievement_claimed("first_step"), "first_step unlocked but remains unclaimed")
 	check(s.achievement_count() == 1, "unlocked achievement count is 1")
 	check(s.unclaimed_achievement_count() == 1, "unclaimed achievement count is 1")
 	check(s.points() == 0, "points are not awarded immediately upon unlock")
-	check(g.achievement_toast != null and g.achievement_toast.visible, "achievement toast appears on unlock")
+	check(not g.achievement_toast.visible and not g.toast_queue.is_empty(), "play queues the achievement without covering the listening cue")
+	g.state = g.State.CLEARED
+	g._flush_toasts()
+	check(g.achievement_toast.visible, "recap displays the queued achievement")
 	var toast_title: String = g.toast_lbl_name.text if g.toast_lbl_name != null else ""
 	check(toast_title.contains("初試身手"), "toast displays achievement title")
 
@@ -666,44 +675,31 @@ func achievement_tests(g) -> void:
 	g.reset_run()
 
 func vfx_tests(g) -> void:
-	print("visual juice & vfx (speedlines, shockwave, shatter)")
+	print("night road effects")
 	g.set_level(0); g.reset_run()
-	check(g.speedlines_rect != null and is_instance_valid(g.speedlines_rect), "speedlines overlay exists on fx_layer")
-	check(g.speedlines_mat != null and is_instance_valid(g.speedlines_mat), "speedlines shader material active")
-	check(g.speedlines_intensity == 0.0, "speedlines intensity starts at 0 while stationary")
-
-	# Speed lines ramp up at high speeds (> 24 km/h)
-	g.ctrl.speed = 15.0 # 54 km/h
-	g.state = g.State.RUNNING
+	var base: Vector2 = g.street_rect.size
+	var camera_origin: float = g.cam.position.z
+	g.ctrl.speed = 15.0
+	g.player_dist = 300.0
 	g._update_view(0.5)
-	check(g.speedlines_intensity > 0.0, "speedlines intensify at high speed (intensity %.2f)" % g.speedlines_intensity)
-	check(float(g.speedlines_mat.get_shader_parameter("intensity")) > 0.0, "shader uniform intensity updated")
-
-	# Cruise lock tint on speedlines
-	g.ctrl.locked = true
-	g._update_view(0.1)
-	var col: Color = g.speedlines_mat.get_shader_parameter("line_color")
-	check(is_equal_approx(col.g, 1.0), "cruise lock gives electric cyan tint to speed lines")
-	g.ctrl.locked = false
-
-	# Screen flash test
-	check(g.hit_flash != null and is_instance_valid(g.hit_flash), "hit_flash overlay exists")
+	var street_motion: ShaderMaterial = g.street_rect.material
+	check(is_equal_approx(street_motion.get_shader_parameter("travel_m"), camera_origin - g.cam.position.z)
+		and g.street_rect.size.is_equal_approx(base), "the street follows the camera without zooming or changing its crop")
 	g._screen_flash(Color(1.0, 0.9, 0.4, 0.2), 0.12)
-	check(g.hit_flash.color.a > 0.1, "screen flash triggers color tint")
-
-	# Shockwave spawn test
-	var child_cnt_before: int = g.fx_layer.get_child_count()
-	g._spawn_shockwave(Vector3(0, 1.0, -10.0), Color(0.35, 0.95, 1.0), 160.0)
-	check(g.fx_layer.get_child_count() > child_cnt_before, "spawn_shockwave adds shockwave node to fx_layer")
-
-	# 2D shatter sprite spawn test
-	child_cnt_before = g.fx_layer.get_child_count()
-	g._spawn_shatter_sprite(Vector3(0, 1.0, -10.0))
-	check(g.fx_layer.get_child_count() > child_cnt_before, "spawn_shatter_sprite adds animated shatter sprite")
-
-	# Reset cleanup
+	check(g.hit_flash.color.a > 0.0 and g.hit_flash.color.a <= 0.065, "the light response stays below the readability cap")
+	var count: int = g.fx_layer.get_child_count()
+	g._spawn_shockwave(Vector3(0, 1.0, -310.0), g.AMBER, 90.0)
+	check(g.fx_layer.get_child_count() > count, "shield response projects to the same street")
+	g.reset_run(); g.start_run()
+	var row = g.active_row()
+	var stone: MeshInstance3D = row.stones[row.target]
+	g.player_dist = row.dist
+	g.player_x = g.lane_x(row.target)
+	count = g.get_child_count()
+	g._resolve(row)
+	check(not stone.visible and g.get_child_count() > count, "a correct hit replaces the slate with flying stone chips")
 	g.reset_run()
-	check(g.speedlines_intensity == 0.0 and g.hit_flash.color.a == 0.0, "reset_run clears speedlines and hit flash")
+	check(g.hit_flash.color.a == 0.0 and g.street_rect.size.is_equal_approx(base), "restart clears the light response and resets street framing")
 
 func endless_mode_tests(g) -> void:
 	print("endless survival mode")
@@ -1221,14 +1217,12 @@ func run_rule_tests(g) -> void:
 	check(feedback_glyphs_ok, "HUD font contains penalty feedback and star glyphs")
 
 	g.reset_run(); g.start_run()
-	var starting_props: Array = g.props.filter(func(prop): return prop.visible)
-	var starting_positions: Array = starting_props.map(func(prop): return prop.position)
+	var starting_rect := Rect2(g.street_rect.position, g.street_rect.size)
 	g.player_dist = 300.0
 	g._update_view(0.0)
 	g.reset_run()
-	var restarted_props: Array = g.props.filter(func(prop): return prop.visible)
-	check(not starting_positions.is_empty() and restarted_props.map(func(prop): return prop.position) == starting_positions,
-		"restart restores the starting roadside after the previous run moved far ahead")
+	check(Rect2(g.street_rect.position, g.street_rect.size).is_equal_approx(starting_rect),
+		"restart restores the starting street crop after travelling")
 	g.show_select()
 
 func question_rotation_tests(g) -> void:
@@ -1292,15 +1286,15 @@ func _menu_ui_tests(g) -> void:
 	g.set_speed_mode("race", false)
 	g._update_hud()
 	check(not g.btn_lock.visible, "ready hides cruise lock so it cannot cover the start instructions")
-	check(is_equal_approx(g.speedo_needle.rotation_degrees, -135.0), "speedometer points to start at rest")
+	check(g.lbl_speed.text == "0 km/h", "speed readout starts at zero")
 	var previous_max: float = g.ctrl.max_speed
 	g.ctrl.max_speed = 72.0 / 3.6
 	g.ctrl.speed = g.ctrl.max_speed * 0.5
 	g._update_hud()
-	check(is_zero_approx(g.speedo_needle.rotation_degrees), "speedometer points to middle at half the configured top speed")
+	check(g.lbl_speed.text == "36 km/h", "speed readout shows half the configured top speed")
 	g.ctrl.speed = g.ctrl.max_speed
 	g._update_hud()
-	check(is_equal_approx(g.speedo_needle.rotation_degrees, 135.0), "speedometer reaches its final tick at the configured top speed")
+	check(g.lbl_speed.text == "72 km/h", "speed readout shows the configured top speed")
 	g.ctrl.max_speed = previous_max
 	g.set_speed_mode("step", false)
 	g.save.set_setting("tutorial_seen", true)
@@ -1396,8 +1390,7 @@ func layout_check(g, sz: Vector2i) -> void:
 	var inside := true
 	var bad := []
 	for item in [["hint", g.lbl_hint], ["notice", g.lbl_notice],
-			["results", g.results_box.get_child(0)], ["select", g.select_box.get_child(0)], ["pause", g.pause_box.get_child(0)], ["settings", g.settings_box.get_child(0)],
-			["speedometer", g.speedo]]:
+			["results", g.results_box.get_child(0)], ["select", g.select_box.get_child(0)], ["settings", g.settings_box.get_child(0)]]:
 		var rc: Rect2 = item[1].get_global_rect()
 		if absf(rc.get_center().x - cx) > 2.0:
 			centered = false; bad.append(item[0])
@@ -1416,8 +1409,16 @@ func layout_check(g, sz: Vector2i) -> void:
 	var sc: Rect2 = g.select_scroll.get_global_rect()
 	var inner: Control = g.select_scroll.get_child(0)
 	check(sc.position.y >= -1 and sc.end.y <= vr.size.y + 1 and inner.size.y > sc.size.y, "%s: level list scrolls inside the screen (list %.0f > view %.0f)" % [tag, inner.size.y, sc.size.y])
+	var wide := vr.size.x >= vr.size.y * 1.25
+	var speed: Rect2 = g.speedo.get_global_rect()
+	check(speed.end.x < cx if wide else absf(speed.get_center().x - cx) < 2.0,
+		"%s: speed readout stays out of the runner silhouette" % tag)
+	var pause_rect: Rect2 = g.pause_box.get_child(0).get_global_rect()
+	check(pause_rect.end.x < cx if wide else absf(pause_rect.get_center().x - cx) < 2.0,
+		"%s: pause is beside the road on wide screens and above the road in portrait" % tag)
 	var tutorial_button: Rect2 = g.btn_tutorial.get_global_rect()
-	check(tutorial_button.position.y >= sc.end.y - 1.0 and vr.grow(1.0).encloses(tutorial_button)
+	var separate := tutorial_button.end.x <= sc.position.x + 1.0 if wide else tutorial_button.position.y >= sc.end.y - 1.0
+	check(separate and vr.grow(1.0).encloses(tutorial_button)
 		and tutorial_button.size.y >= minf(vr.size.x, vr.size.y) * 0.11,
 		"%s: stage list leaves room for the touch-sized tutorial entry after live resize" % tag)
 	var lk: Rect2 = g.btn_lock.get_global_rect()
@@ -1427,17 +1428,20 @@ func layout_check(g, sz: Vector2i) -> void:
 			g.btn_mode_race, g.btn_mode_step, g.btn_settings_back]:
 		menu_touch_sized = menu_touch_sized and button.size.y * float(sz.y) / vr.size.y >= 44.0
 	check(menu_touch_sized, "%s: pause and settings controls have at least 44 screen pixels of touch height" % tag)
-	var road := Rect2(cx - mn * 0.17, mn * 0.43, mn * 0.34, vr.size.y - mn * 0.67)
+	var horizon: Vector2 = g.cam.unproject_position(g.cam.position + Vector3(0.0, 0.0, -120.0))
+	var road := Rect2(cx - mn * 0.17, horizon.y, mn * 0.34, vr.size.y - horizon.y - mn * 0.24)
 	var road_clear := true
 	for overlay in [g.go_box, g.judge, g.shield_box, g.combo_badge, g.lbl_notice, g.lbl_float, g.btn_lock]:
 		road_clear = road_clear and not road.intersects(overlay.get_global_rect())
 	check(road_clear, "%s: active stones and runner are clear of feedback overlays" % tag)
 	check(lk.get_center().x > cx and lk.end.y < a.position.y and absf(lk.end.x - a.end.x) < 1.0, "%s: cruise lock sits directly above the accelerator" % tag)
 	check(g.lbl_center.custom_minimum_size.x <= mn * 0.85, "%s: start instructions use a compact paper sign" % tag)
-	check(a.size.x >= mn * 0.27 and b.size.x >= mn * 0.23 and p.size.x >= mn * 0.12, "%s: touch buttons scale with short side (加速 %.0f of %.0f)" % [tag, a.size.x, mn])
+	var screen_scale := float(sz.y) / vr.size.y
+	check(a.size.y * screen_scale >= 44.0 and b.size.y * screen_scale >= 44.0 and p.size.y * screen_scale >= 44.0,
+		"%s: accelerate, brake and pause keep 44 screen pixels of touch height" % tag)
 	check(not lk.intersects(a) and not lk.intersects(b) and not lk.intersects(p) and not lk.intersects(v) and not lk.intersects(g.lbl_speed.get_global_rect()) and not lk.intersects(g.lbl_combo.get_global_rect()), "%s: 鎖定 clear of other buttons and HUD" % tag)
 	check(not a.intersects(g.lbl_speed.get_global_rect()) and not b.intersects(g.lbl_speed.get_global_rect()) and not a.intersects(g.lbl_combo.get_global_rect()) and not b.intersects(g.lbl_combo.get_global_rect()), "%s: speed/combo text clear of buttons" % tag)
-	check(g.lbl_speed.position.x >= g.speedo.size.x * 0.4, "%s: speed readout stays clear of dial" % tag)
+	check(g.speedo.get_global_rect().encloses(g.lbl_speed.get_global_rect().grow(-2.0)), "%s: speed number sits in the readout" % tag)
 	check(p.position.y < vr.size.y * 0.2 and p.get_center().x > vr.size.x * 0.75 and not p.intersects(v) and not a.intersects(b), "%s: pause/speaker top-right, buttons don't overlap" % tag)
 
 func safe_area_tests(g) -> void:
@@ -1591,7 +1595,7 @@ func joypad_tests(g) -> void:
 	g.show_settings()
 	check(g.btn_mode_race.focus_neighbor_bottom == g.btn_mode_step.get_path(), "settings focus: mode_race down -> mode_step")
 	check(g.btn_lang.focus_neighbor_right == g.btn_vibration.get_path(), "settings focus: lang right -> vibration")
-	check(g.btn_vibration.focus_neighbor_bottom == g.btn_settings_back.get_path(), "settings focus: vibration down -> back")
+	check(g.btn_vibration.focus_neighbor_bottom == g.btn_show_kana.get_path(), "settings focus: vibration down -> show-kana assist")
 	g.hide_settings()
 
 func i18n_tests(g) -> void:
@@ -1680,8 +1684,58 @@ func audio_polish_tests(g) -> void:
 	g.sfx("non_existent_sfx") # must not crash
 	check(true, "All audio SFX triggers and fallback guards execute without error")
 
+	var old_pitch_mode = g.save.get_setting("hit_pitch_mode", "pentatonic")
+	var old_sfx_volume = g.save.get_setting("vol_sfx", 1.0)
+	g.save.set_setting("hit_pitch_mode", "pentatonic")
+	g.save.set_setting("vol_sfx", 1.0)
+	for hit_combo in [3, 4, 9, 10, 50, 55]:
+		g.set_level(3 if hit_combo == 55 else 0)
+		g.reset_run()
+		g.start_run()
+		for player in g.sfx_pool:
+			player.stop()
+		g.combo = hit_combo - 1
+		if hit_combo == 55:
+			g.boss_shield_up = true
+			g.break_progress = g.break_chain - 1
+		g.voice.stream = Assets.VOICE.na
+		_answer(g, "correct")
+		var impacts: Array = g.sfx_pool.filter(func(p):
+			return p.playing and p.stream != null and p.stream.resource_path.contains("/shatter"))
+		check(impacts.size() == 1, "combo %d uses a single fracture sound" % hit_combo)
+		if impacts.size() == 1:
+			var impact: AudioStreamPlayer = impacts[0]
+			var duration := impact.stream.get_length() / impact.pitch_scale
+			check(absf(duration - Assets.SFX.shatter.get_length()) < 0.03, "combo %d preserves the full impact duration" % hit_combo)
+		var upcoming = g.active_row()
+		var cue: AudioStream = Assets.VOICE[g._romaji(upcoming.kana[upcoming.target])]
+		g._tick(0.1)
+		check(g.voice.stream == Assets.VOICE.na, "combo %d leaves the start of the impact clear" % hit_combo)
+		if hit_combo == 3:
+			g.pause_game()
+			g._process(0.4)
+			check(g.voice.stream == Assets.VOICE.na, "pause holds the delayed cue")
+			g.resume()
+			g._tick(0.29)
+			check(g.voice.stream == cue and is_equal_approx(upcoming.voice_t, g.elapsed),
+				"the automatic cue still plays and timestamps its actual start")
+		elif hit_combo == 4:
+			g.replay_voice()
+			check(g.voice.stream == cue, "manual replay can start a waiting cue immediately")
+			g.voice.stream = Assets.VOICE.na
+			g._tick(0.3)
+			check(g.voice.stream == Assets.VOICE.na, "manual replay consumes the waiting cue")
+		else:
+			g._tick(0.12)
+			check(g.voice.stream == Assets.VOICE.na, "combo %d retains the audio lead at higher pitches" % hit_combo)
+			g._tick(0.18)
+			check(g.voice.stream == cue, "combo %d still emits the next question voice" % hit_combo)
+	g.save.set_setting("hit_pitch_mode", old_pitch_mode)
+	g.save.set_setting("vol_sfx", old_sfx_volume)
+
 	# Reset level back to 0
 	g.set_level(0)
+	g.reset_run()
 
 func title_and_transition_tests(g) -> void:
 	print("title screen & transitions")
@@ -1861,23 +1915,14 @@ func cyber_polish_tests(g) -> void:
 	g.save.equip_aura("default")
 	g.save.add_points(-g.save.points() + prev_pts)
 
-	# 4. Background buildings and roadside cyber props
-	check(g.Art.PROPS.has("house_l_cyber"), "Art.PROPS contains house_l_cyber")
-	check(g.Art.PROPS.has("house_r_tower"), "Art.PROPS contains house_r_tower")
-	check(g.Art.PROPS.has("cyber_hologram"), "Art.PROPS contains cyber_hologram")
-	check(g.MID_PROPS_L.has("house_l_cyber"), "MID_PROPS_L includes house_l_cyber")
-	check(g.MID_PROPS_R.has("house_r_tower"), "MID_PROPS_R includes house_r_tower")
-	check(!g.NEAR_PROPS_L.has("cyber_hologram") and g.NEAR_PROPS_L.has("vending"), "NEAR_PROPS_L excludes opaque cyber_hologram")
-	check(g.NEAR_PROPS_L.has("bench"), "NEAR_PROPS_L includes bench")
-	check(g.NEAR_PROPS_L.has("shrub"), "NEAR_PROPS_L includes shrub")
-
-	# 5. Camera height, runner transparency & gameplay improvements
+	# 4. The stage and player poses share one aligned camera.
+	check(g.bg_layer.get_child_count() == 1 and g.street_rect.texture == g.Art.NIGHT_ROAD, "street renders from one continuous painted plate")
 	g._update_view(0.0)
-	check(g.cam.position.y >= 4.0, "camera height raised to 4.1m to eliminate middle-lane occlusion")
-	check(g.runner.has_method("set_opacity"), "runner sprite supports set_opacity")
-	g.runner.set_opacity(0.55)
-	check(g.runner._mat.get_shader_parameter("opacity") == 0.55, "runner shader receives opacity")
-	g.runner.set_opacity(1.0)
+	check(g.cam.rotation.is_zero_approx(), "camera remains level and on the spine axis")
+	check(g.runner.anchor_local() == Vector3.ZERO, "runner pose uses a fixed sole anchor")
+	var cells: Vector2i = g.Art.RUNNER_GRID
+	check(g.Art.NIGHT_RUNNER.get_size().is_equal_approx(g.Art.RUNNER_CELL * Vector2(cells)), "atlas dimensions match the shared animation manifest")
+	check(g.Art.RUNNER.run.frames >= 4, "runner cycle uses four different painted frames")
 
 	# 6. Boss shield time bonus check
 	g.set_level(3); g.reset_run(); g.start_run()

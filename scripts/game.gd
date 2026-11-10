@@ -13,7 +13,7 @@ const LevelDB = preload("res://scripts/level_db.gd")
 const Art = preload("res://scripts/art_manifest.gd")
 const RunnerSprite = preload("res://scripts/runner_sprite.gd")
 const StoneTablet = preload("res://scripts/stone_tablet.gd")
-var stone_mesh: ArrayMesh
+var stone_mesh: QuadMesh
 var stone_material: ShaderMaterial
 
 ## HP hooks for later upgrades: (hp, max_hp, shield)
@@ -50,6 +50,11 @@ var current_input_device: String = "keyboard"
 var vibration_enabled := true
 var btn_vibration: Button
 var btn_hit_pitch: Button
+var btn_motion: Button
+var btn_show_kana: Button
+var btn_assist_power: Button
+var lbl_vol_head: Label
+var lbl_opt_head: Label
 var pad_bar: Label
 var lbl_badge_accel: Label
 var lbl_badge_brake: Label
@@ -68,7 +73,6 @@ var dev_mode := false
 var elapsed := 0.0
 var penalty := 0.0
 var shield_bonus := 0.0
-var runner_opacity := 1.0
 var endless_slow_timer := 0.0
 var endless_drain_tick := 0.0
 var correct := 0
@@ -155,9 +159,9 @@ var toast_lbl_name: Label = null
 var toast_lbl_desc: Label = null
 var toast_queue: Array = []
 var toast_tween: Tween = null
-var runner_trail: CPUParticles3D = null
 
 const PENTATONIC_RATIOS := [1.0, 1.12246, 1.25992, 1.49831, 1.68179]
+const HIT_VOICE_LEAD_S := 0.36
 
 const AURAS := {
 	"default": {
@@ -261,19 +265,25 @@ const AURAS := {
 const UPGRADES := {
 	"hp_level": {
 		"name": "強化裝甲",
+		"name_key": "UP_HP_NAME",
 		"desc": "最大生命值提升 (+20 HP/級)",
+		"desc_key": "UP_HP_DESC",
 		"max_level": 2,
 		"costs": [150, 300]
 	},
 	"shield_level": {
 		"name": "防護力場",
+		"name_key": "UP_SHIELD_NAME",
 		"desc": "開局自帶護盾抵消失誤 (1 層/級)",
+		"desc_key": "UP_SHIELD_DESC",
 		"max_level": 2,
 		"costs": [250, 500]
 	},
 	"armor_level": {
 		"name": "緩衝減震",
+		"name_key": "UP_ARMOR_NAME",
 		"desc": "撞錯石碑扣血減少 (-15%/級)",
+		"desc_key": "UP_ARMOR_DESC",
 		"max_level": 2,
 		"costs": [200, 400]
 	}
@@ -374,21 +384,22 @@ var hearts_box: Control       # HP widget (heart icon + bar + number), top-left
 var hp_flash_tween: Tween
 var hp_shake_tween: Tween
 var hp_shake_offset := 0.0
-var hp_fill: NinePatchRect
-var hp_chunk: NinePatchRect
-var timer_panel: NinePatchRect
-var combo_badge: NinePatchRect
+var hp_fill: ColorRect
+var hp_chunk: ColorRect
+var timer_panel: Control
+var combo_badge: Control
 var speedo: Control
-var speedo_needle: TextureRect
 var lbl_lock_kmh: Label
-var shield_box: NinePatchRect
-var judge: TextureRect
-var go_box: Control
-var sel_bg: TextureRect
-var res_bg: TextureRect
+var shield_box: Control
+var judge: Label
+var go_box: Label
+var menu_shade: ColorRect
 var res_stars: HBoxContainer
-var res_badge: TextureRect
-const INK := Color(0.96, 0.97, 1.0)
+var res_badge: Panel
+const INK := Color("f5e9d4")
+const AMBER := Color("d9ad7f")
+const MUTED := Color("c6bfba")
+const PAPER := preload("res://art/ui/night_paper.png")
 var lbl_hp: Label
 var lbl_shield: Label
 # distance / points / review / boss shield
@@ -407,9 +418,9 @@ var last_points := 0
 var last_record := {}
 var review_asked := 0
 const TUTORIAL_ROWS := [
-	{"kana": ["い", "あ", "う"], "target": 1, "prompt": "聽見「あ」，撞上中線石碑。"},
-	{"kana": ["い", "う", "あ"], "target": 0, "prompt": "聽到「い」，往左換線。\n手機左右滑，鍵盤用方向鍵。"},
-	{"kana": ["あ", "い", "う"], "target": 2, "prompt": "按「重播」或 E 再聽一次。\n換到對應的線，再撞上石碑。"},
+	{"kana": ["い", "あ", "う"], "target": 1, "prompt_key": "TUT_1"},
+	{"kana": ["い", "う", "あ"], "target": 0, "prompt_key": "TUT_2"},
+	{"kana": ["あ", "い", "う"], "target": 2, "prompt_key": "TUT_3"},
 ]
 var tutorial_step := -1
 var tutorial_replayed := false
@@ -437,7 +448,6 @@ var btn_title_start: Button
 var btn_title_settings: Button
 var btn_title_quit: Button
 var btn_to_title: Button
-var title_logo_rect: TextureRect
 var press_start_tween: Tween
 var transition_layer: CanvasLayer
 var fade_rect: ColorRect
@@ -530,25 +540,12 @@ const CHART_YOUON := [
 # nodes
 var player: Node3D
 var player_mesh: MeshInstance3D
-var runner          # RunnerSprite (batch07 sheets)
+var runner          # RunnerSprite
 var bg_layer: CanvasLayer
-var sky_rect: TextureRect
-var far_rect: TextureRect
-var props: Array = []
-var prop_rng := RandomNumberGenerator.new()   # separate: never touches the question rng
-var next_prop := {"near_l": 0.0, "near_r": 0.0, "mid_l": 0.0, "mid_r": 0.0, "far_l": 0.0, "far_r": 0.0}
-var road_mats: Array = []
-var petals: CPUParticles2D
+var street_rect: TextureRect
 var fx_layer: CanvasLayer
-var speedlines_rect: ColorRect = null
-var speedlines_mat: ShaderMaterial = null
-var speedlines_intensity: float = 0.0
 var hit_flash: ColorRect = null
-const TRACK_TILE_M := 6.6
-var player_mat: StandardMaterial3D
 var cam: Camera3D
-var base_fov := 70.0
-var stripes: Array = []
 var voice: AudioStreamPlayer
 var music: AudioStreamPlayer
 var sfx_pool: Array = []
@@ -563,6 +560,7 @@ var ready_knowledge: Label
 var lbl_dev: Label
 var lbl_float: Label
 var lbl_hint: Label
+var lbl_listen: Label
 var lbl_combo: Label
 var lbl_notice: Label
 var notice_tween: Tween
@@ -616,6 +614,9 @@ var btn_review_next: Button
 var btn_review_back: Button
 var select_box: Control
 var select_list: VBoxContainer
+var select_columns: BoxContainer
+var select_toolbar: VBoxContainer
+var select_footer: BoxContainer
 var level_buttons: Array = []
 var btn_accel: Panel
 var btn_brake: Panel
@@ -730,228 +731,89 @@ func set_distance(d: String, persist := true) -> void:
 func lane_x(i: int) -> float:
 	return (i - (lane_count - 1) * 0.5) * lane_w
 
-func _mat(c: Color, emit := false) -> StandardMaterial3D:
-	var m := StandardMaterial3D.new()
-	m.albedo_color = c
-	if emit:
-		m.emission_enabled = true
-		m.emission = c
-		m.emission_energy_multiplier = 0.0
-	return m
+# Coordinates measured on the continuous 1536 × 1024 painting.
+const STREET_VP := Vector2(773.0, 456.0)
+const STREET_FOCAL_PX := 1430.0
+const STREET_CAMERA_HEIGHT := 3.35
+const STREET_CAMERA_DISTANCE := 14.4
+# Rendering scale shared by the corridor, camera, runner and row spacing.
+const STREET_DISTANCE_SCALE := 0.66
+const RUNNER_FOREGROUND_OFFSET := 2.6
+const STREET_NEAR := 0.1
 
 func _build_world() -> void:
 	var env := WorldEnvironment.new()
 	var e := Environment.new()
-	e.background_mode = Environment.BG_CANVAS     # sky + skyline are 2D layers behind the 3D world
+	e.background_mode = Environment.BG_CANVAS
 	e.background_canvas_max_layer = -1
-	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	e.ambient_light_color = Color(1, 1, 1)
 	env.environment = e
 	add_child(env)
 	bg_layer = CanvasLayer.new()
 	bg_layer.layer = -5
 	add_child(bg_layer)
-	sky_rect = TextureRect.new()
-	sky_rect.texture = Art.SKY
-	sky_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	sky_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	sky_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_place_px(sky_rect, 0, 0, 1, 1, 0, 0, 0, 0)
-	bg_layer.add_child(sky_rect)
-	far_rect = TextureRect.new()
-	far_rect.texture = Art.FAR
-	far_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	far_rect.stretch_mode = TextureRect.STRETCH_TILE
-	far_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bg_layer.add_child(far_rect)
-	# ground: wide pale base + sidewalks + 3-lane track tile (UV scrolls with distance)
-	var base := MeshInstance3D.new()
-	var bp := PlaneMesh.new(); bp.size = Vector2(160, 400)
-	base.mesh = bp
-	var bmat := _mat(Color(0.06, 0.05, 0.12)); bmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	base.material_override = bmat
-	base.position.y = -0.02
-	base.name = "Ground"
-	add_child(base)
-	for spec in [
-		[0.0, lane_w * lane_count, Art.TRACK, TRACK_TILE_M, Color.WHITE],
-		[-(lane_w * lane_count * 0.5 + 2.0), 4.0, Art.SIDEWALK, 8.0, Color.WHITE],
-		[lane_w * lane_count * 0.5 + 2.0, 4.0, Art.SIDEWALK, 8.0, Color.WHITE],
-		[-(lane_w * lane_count * 0.5 + 16.0), 24.0, Art.SIDEWALK, 8.0, Color(0.48, 0.44, 0.62)],
-		[lane_w * lane_count * 0.5 + 16.0, 24.0, Art.SIDEWALK, 8.0, Color(0.48, 0.44, 0.62)]
-	]:
-		var mi := MeshInstance3D.new()
-		var pm := PlaneMesh.new(); pm.size = Vector2(spec[1], 400)
-		mi.mesh = pm
-		var m := StandardMaterial3D.new()
-		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.albedo_texture = spec[2]
-		m.albedo_color = spec[4]
-		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
-		m.uv1_scale = Vector3(maxf(1.0, float(spec[1]) / 8.0), 400.0 / float(spec[3]), 1)
-		m.set_meta("tile", float(spec[3]))
-		mi.material_override = m
-		mi.position = Vector3(spec[0], 0.02, 0)
-		base.add_child(mi)
-		road_mats.append(m)
+	street_rect = TextureRect.new()
+	street_rect.name = "NightRoad"
+	street_rect.texture = Art.NIGHT_ROAD
+	var street_motion := ShaderMaterial.new()
+	street_motion.shader = preload("res://shaders/night_road_motion.gdshader")
+	street_motion.set_shader_parameter("vanishing_px", STREET_VP)
+	street_motion.set_shader_parameter("camera_height", STREET_CAMERA_HEIGHT)
+	street_motion.set_shader_parameter("focal_px", STREET_FOCAL_PX)
+	street_motion.set_shader_parameter("corridor", preload("res://art/stage/night_corridor.png"))
+	street_motion.set_shader_parameter("sky_reveal", preload("res://art/stage/night_sky_reveal.png"))
+	street_motion.set_shader_parameter("travel_m", 0.0)
+	street_rect.material = street_motion
+	street_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	street_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bg_layer.add_child(street_rect)
+
 	player = Node3D.new()
 	add_child(player)
-	player_mesh = MeshInstance3D.new()      # kept for hit tweens; the visible body is the sprite
-	player_mat = _mat(Color(1, 1, 1), true)
+	player.add_child(_contact_shadow(Vector2(player_w * 1.65, 0.83)))
+	player_mesh = MeshInstance3D.new()
 	player.add_child(player_mesh)
 	runner = RunnerSprite.new()
 	player_mesh.add_child(runner)
-	var shadow := MeshInstance3D.new()
-	var sq := QuadMesh.new(); sq.size = Vector2(1.3, 0.65); sq.orientation = PlaneMesh.FACE_Y
-	shadow.mesh = sq
-	var sm := StandardMaterial3D.new()
-	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	sm.albedo_texture = Art.PIXEL_SHADOW
-	sm.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-	shadow.material_override = sm
-	shadow.position.y = 0.01
-	player.add_child(shadow)
-	runner_trail = CPUParticles3D.new()
-	var trail_quad := QuadMesh.new()
-	trail_quad.size = Vector2(0.16, 0.16)
-	runner_trail.mesh = trail_quad
-	var trail_mat := StandardMaterial3D.new()
-	trail_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	trail_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	trail_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	trail_mat.vertex_color_use_as_albedo = false
-	trail_mat.albedo_color = Color(0.35, 0.65, 1.0, 0.75)
-	trail_mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
-	runner_trail.material_override = trail_mat
-	runner_trail.local_coords = false
-	runner_trail.amount = 20
-	runner_trail.lifetime = 0.35
-	runner_trail.direction = Vector3(0, 0.3, 1.0)
-	runner_trail.spread = 20.0
-	runner_trail.gravity = Vector3(0, -0.5, 0)
-	runner_trail.initial_velocity_min = 1.5
-	runner_trail.initial_velocity_max = 3.5
-	runner_trail.scale_amount_min = 0.4
-	runner_trail.scale_amount_max = 1.0
-	runner_trail.position = Vector3(0, 0.08, 0.2)
-	runner_trail.emitting = false
-	player.add_child(runner_trail)
+
 	cam = Camera3D.new()
-	cam.fov = base_fov
+	cam.keep_aspect = Camera3D.KEEP_HEIGHT
 	add_child(cam)
-	# petals (zone 1 ambience) on a 2D layer between world and HUD
+	_layout_street()
+
 	fx_layer = CanvasLayer.new()
 	fx_layer.layer = 0
 	add_child(fx_layer)
-
-	speedlines_mat = ShaderMaterial.new()
-	speedlines_mat.shader = preload("res://shaders/speedlines.gdshader")
-	speedlines_mat.set_shader_parameter("intensity", 0.0)
-	speedlines_mat.set_shader_parameter("inner_radius", 0.32)
-
-	speedlines_rect = ColorRect.new()
-	speedlines_rect.name = "SpeedLines"
-	speedlines_rect.material = speedlines_mat
-	speedlines_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	speedlines_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
-	fx_layer.add_child(speedlines_rect)
-
 	hit_flash = ColorRect.new()
 	hit_flash.name = "HitFlash"
 	hit_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hit_flash.set_anchors_preset(Control.PRESET_FULL_RECT)
-	hit_flash.color = Color(1.0, 1.0, 1.0, 0.0)
+	hit_flash.color = Color.TRANSPARENT
 	fx_layer.add_child(hit_flash)
-	petals = CPUParticles2D.new()
-	var at := AtlasTexture.new(); at.atlas = Art.VFX.petals; at.region = Rect2(0, 0, 64, 64)
-	petals.texture = at
-	petals.amount = 28
-	petals.lifetime = 5.0
-	petals.preprocess = 5.0
-	petals.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
-	petals.direction = Vector2(0.3, 1)
-	petals.spread = 30.0
-	petals.gravity = Vector2(0, 40)
-	petals.initial_velocity_min = 40.0
-	petals.initial_velocity_max = 90.0
-	petals.angular_velocity_min = -90.0
-	petals.angular_velocity_max = 90.0
-	petals.scale_amount_min = 0.5
-	petals.scale_amount_max = 1.0
-	fx_layer.add_child(petals)
 
-## Roadside props: strictly separated into dedicated left-side and right-side perspective pools
-## to prevent perspective inversion and guarantee authentic Shibuya commercial streetscape.
-const MID_PROPS_L := ["house_a", "shop", "house_l_record", "house_l_cyber"]
-const MID_PROPS_R := ["house_b", "house_r_karaoke", "house_r_109", "house_r_tower"]
-const NEAR_PROPS_L := ["vending", "lamp", "fence", "planter", "bench", "shrub"]
-const NEAR_PROPS_R := ["vending", "lamp", "fence", "planter", "bench", "shrub"]
-const FAR_PROPS_L := ["house_l_record", "house_a", "shop", "house_l_cyber"]
-const FAR_PROPS_R := ["house_r_109", "house_r_karaoke", "house_b", "house_r_tower"]
-const PROP_H := {"house_a": 8.0, "house_b": 8.0, "house_r_karaoke": 8.0, "house_r_109": 8.0, "house_l_record": 8.0, "house_l_cyber": 8.0, "house_r_tower": 8.5, "shop": 7.5, "wall": 2.2, "sakura_big": 6.0, "sakura_small": 4.6,
-	"lamp": 4.2, "bench": 0.9, "planter": 0.9, "shrub": 1.4, "vending": 1.9, "fence": 1.2, "cyber_hologram": 3.4}
-func _spawn_props() -> void:
-	var far := player_dist + 140.0
-	for key in next_prop:
-		var is_far: bool = key.begins_with("far")
-		var mid: bool = key.begins_with("mid")
-		var is_left: bool = key.ends_with("_l")
-		var side := -1.0 if is_left else 1.0
-		while next_prop[key] < far:
-			var pool: Array
-			if is_far:
-				pool = FAR_PROPS_L if is_left else FAR_PROPS_R
-			elif mid:
-				pool = MID_PROPS_L if is_left else MID_PROPS_R
-			else:
-				pool = NEAR_PROPS_L if is_left else NEAR_PROPS_R
-			var n: String = pool[prop_rng.randi_range(0, pool.size() - 1)]
-			var sp: Sprite3D
-			for q in props:
-				if not q.visible:
-					sp = q
-					break
-			if sp == null:
-				sp = Sprite3D.new()
-				sp.shaded = false
-				sp.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
-				sp.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
-				sp.centered = true
-				add_child(sp)
-				props.append(sp)
-			sp.texture = Art.PROPS[n]
-			var sz: Array = Art.PROP_SIZE[n]
-			var h_mult: float = 1.35 if is_far else 1.0
-			sp.pixel_size = float(PROP_H[n]) * h_mult / float(sz[1])
-			var half_w := float(sz[0]) * sp.pixel_size * 0.5
-			var road := lane_w * lane_count * 0.5 + 2.0
-			var x: float
-			if is_far:
-				x = road + 7.5 + half_w
-				sp.modulate = Color(0.48, 0.44, 0.65, 1.0)
-			elif mid:
-				x = road + 0.6 + half_w
-				sp.modulate = Color.WHITE
-			else:
-				x = road - 0.3 + half_w * 0.5
-				sp.modulate = Color(1.15, 1.25, 1.35, 0.95) if n == "cyber_hologram" else Color.WHITE
-			sp.offset = Vector2(0, float(sz[1]) * 0.5)   # bottom-centre anchor (0.5, 1.0)
-			sp.position = Vector3(side * x, 0.0, -next_prop[key])
-			sp.flip_h = false # strictly preserve Japanese kanji & neon signs from mirroring
-			sp.visible = true
-			if is_far:
-				next_prop[key] += (half_w * 2.0 + prop_rng.randf_range(4.0, 9.0))
-			elif mid:
-				next_prop[key] += (half_w * 2.0 + prop_rng.randf_range(3.5, 8.0))
-			else:
-				next_prop[key] += prop_rng.randf_range(6.0, 11.0)
-	for q in props:
-		if q.visible and q.position.z > -player_dist + 9.0:
-			q.visible = false
+func _contact_shadow(extent: Vector2) -> MeshInstance3D:
+	var shadow := MeshInstance3D.new()
+	shadow.name = "ContactShadow"
+	var quad := QuadMesh.new()
+	quad.orientation = PlaneMesh.FACE_Y
+	quad.size = extent
+	shadow.mesh = quad
+	var mat := ShaderMaterial.new()
+	mat.shader = preload("res://shaders/night_contact.gdshader")
+	shadow.material_override = mat
+	return shadow
 
-## All HUD controls are anchored to the viewport (no fixed 720-px design widths),
-## so they stay correct when the window / web canvas is wider or narrower.
+func _layout_street() -> float:
+	var view := get_viewport().get_visible_rect().size
+	var art_size := Art.NIGHT_ROAD.get_size()
+	var usable_width := 2.0 * minf(STREET_VP.x, art_size.x - STREET_VP.x)
+	var art_scale := maxf(view.x / usable_width, view.y / art_size.y)
+	var horizon := Vector2(view.x * 0.5, view.y * 0.5 + (STREET_VP.y - art_size.y * 0.5) * art_scale)
+	street_rect.size = art_size * art_scale
+	street_rect.position = horizon - STREET_VP * art_scale
+	var near_pixel := STREET_NEAR / (STREET_FOCAL_PX * art_scale)
+	cam.set_frustum(view.y * near_pixel, Vector2(0.0, (horizon.y - view.y * 0.5) * near_pixel), STREET_NEAR, 240.0)
+	return art_scale
+
 func _label(size: int, align := HORIZONTAL_ALIGNMENT_LEFT, font: Font = null) -> Label:
 	var l := Label.new()
 	l.add_theme_font_override("font", font if font else Assets.FONT_HUD)
@@ -1033,55 +895,70 @@ func _button(text: String) -> Button:
 	)
 	return b
 
-## StyleBoxTexture from art/ui (no baked text). margin = 9-slice margin in source px.
-func _tex_style(name: String, margin := 0, content_l := -1.0) -> StyleBoxTexture:
-	var sb := StyleBoxTexture.new()
-	sb.texture = Art.UI[name]
-	sb.set_texture_margin_all(margin)
-	sb.set_content_margin_all(maxf(8.0, margin * 0.5))
+## The rectangular text surfaces use native styling and shared semantic states.
+func _surface(fill: Color, edge := Color.TRANSPARENT, padding := 12.0) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = fill
+	sb.border_color = edge
+	sb.border_width_bottom = 2 if edge.a > 0.0 else 0
+	sb.set_content_margin_all(padding)
+	return sb
+
+func _paper_style(padding: float) -> StyleBoxTexture:
+	var paper := StyleBoxTexture.new()
+	paper.texture = PAPER
+	paper.axis_stretch_horizontal = StyleBoxTexture.AXIS_STRETCH_MODE_TILE
+	paper.axis_stretch_vertical = StyleBoxTexture.AXIS_STRETCH_MODE_TILE
+	paper.set_content_margin_all(padding)
+	return paper
+
+func _control_style(variant: String, content_l := -1.0) -> StyleBoxFlat:
+	var base := Color("242c3b")
+	var edge := Color("5b4e46")
+	if variant.ends_with("_disabled") or variant.ends_with("_locked"):
+		base = Color("1b2330")
+		edge = Color("3d4048")
+	elif variant.ends_with("_pressed") or variant.ends_with("_selected") or variant in ["btn_lock_on", "tab_active"]:
+		base = Color("513f37")
+		edge = AMBER
+	elif variant.begins_with("btn_primary") or variant.begins_with("btn_continue"):
+		base = Color("41332d")
+		edge = AMBER
+	var sb := _surface(base, edge)
 	if content_l >= 0.0:
 		sb.content_margin_left = content_l
 	return sb
 
-## Text-less art button: normal / pressed / disabled textures; label stays a Godot label.
-func _art_button(b: Button, prefix: String, margin := 0, content_l := -1.0, size := Vector2.ZERO) -> void:
-	var n := _tex_style(prefix + "_normal" if Art.UI.has(prefix + "_normal") else prefix, margin, content_l)
-	var pr := _tex_style(prefix + "_pressed" if Art.UI.has(prefix + "_pressed") else prefix, margin, content_l)
-	var d := _tex_style(prefix + "_disabled" if Art.UI.has(prefix + "_disabled") else (prefix + "_normal" if Art.UI.has(prefix + "_normal") else prefix), margin, content_l)
-	b.add_theme_stylebox_override("normal", n)
-	b.add_theme_stylebox_override("hover", n)
-	var focus := StyleBoxFlat.new()
-	focus.draw_center = false
-	focus.border_color = Color("a64a09")
-	focus.set_border_width_all(6)
-	focus.set_corner_radius_all(16)
+func _style_button(b: Button, prefix: String, content_l := -1.0) -> void:
+	var normal := _control_style(prefix, content_l)
+	var pressed := _control_style(prefix + "_pressed", content_l)
+	b.add_theme_stylebox_override("normal", normal)
+	b.add_theme_stylebox_override("hover", _control_style(prefix + "_selected", content_l))
+	b.add_theme_stylebox_override("pressed", pressed)
+	b.add_theme_stylebox_override("hover_pressed", pressed)
+	b.add_theme_stylebox_override("disabled", _control_style(prefix + "_disabled", content_l))
+	var focus := _surface(Color.TRANSPARENT, AMBER, 0.0)
+	focus.set_border_width_all(3)
 	b.add_theme_stylebox_override("focus", focus)
-	b.add_theme_stylebox_override("pressed", pr)
-	b.add_theme_stylebox_override("hover_pressed", pr)
-	b.add_theme_stylebox_override("disabled", d)
 	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color", "font_hover_pressed_color"]:
 		b.add_theme_color_override(c, INK)
-	b.add_theme_color_override("font_disabled_color", Color(INK, 0.78))
-	if size != Vector2.ZERO:
-		b.custom_minimum_size = size
+	b.add_theme_color_override("font_disabled_color", MUTED)
 
 func _ink(l: Control) -> void:
 	l.add_theme_color_override("font_color", INK)
 	l.add_theme_color_override("font_outline_color", Color(0.04, 0.03, 0.08, 0.95))
 	l.add_theme_constant_override("outline_size", 4)
 
-func _panel_center(style := "panel_9slice") -> Array:
+func _panel_center(paper := true) -> Array:
 	var cc := CenterContainer.new()
 	_place(cc, 0, 0, 1, 1, 0, 0, 0, 0)
 	cc.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(cc)
 	var pc := PanelContainer.new()
-	if style == "":
+	if not paper:
 		pc.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	else:
-		var sb := _tex_style(style, 44)
-		sb.set_content_margin_all(48)
-		pc.add_theme_stylebox_override("panel", sb)
+		pc.add_theme_stylebox_override("panel", _paper_style(32.0))
 	cc.add_child(pc)
 	var vb := VBoxContainer.new()
 	vb.add_theme_constant_override("separation", 18)
@@ -1092,196 +969,118 @@ func _panel_center(style := "panel_9slice") -> Array:
 func _build_hud() -> void:
 	hud = CanvasLayer.new()
 	add_child(hud)
-	timer_panel = NinePatchRect.new()
-	timer_panel.texture = Art.UI.timer_panel
-	timer_panel.patch_margin_left = 24; timer_panel.patch_margin_right = 24; timer_panel.patch_margin_top = 24; timer_panel.patch_margin_bottom = 24
-	timer_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(timer_panel)
-	var ti := TextureRect.new()
-	ti.texture = Art.UI.icon_timer
-	ti.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	ti.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	ti.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	timer_panel.add_child(ti); _place_px(ti, 0.05, 0.16, 0.20, 0.79, 0, 0, 0, 0)
-	lbl_time = _label(34)
-	lbl_time.reparent(timer_panel, false)
-	_place_px(lbl_time, 0.22, 0.04, 0.97, 0.9, 0, 0, 0, 0)
-	_ink(lbl_time)
-	lbl_count = _label(40)
-	lbl_count.add_theme_color_override("font_color", INK)
-	lbl_count.add_theme_color_override("font_outline_color", Color("fff8eb"))
-	lbl_count.add_theme_constant_override("outline_size", 10)
+	menu_shade = ColorRect.new()
+	menu_shade.color = Color(0.027, 0.039, 0.07, 0.46)
+	menu_shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(menu_shade)
+	menu_shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+	lbl_time = _label(26)
+	lbl_count = _label(26)
+	lbl_hp = _label(26)
+	lbl_shield = _label(24, HORIZONTAL_ALIGNMENT_RIGHT)
+	lbl_boss = _label(23)
+	lbl_combo = _label(24, HORIZONTAL_ALIGNMENT_RIGHT)
+	timer_panel = lbl_time
+	combo_badge = lbl_combo
+	shield_box = lbl_boss
 	hearts_box = Control.new()
 	hearts_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(hearts_box)
-	var frame := NinePatchRect.new()
-	frame.texture = Art.UI.hp_frame
-	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hearts_box.add_child(frame); _place_px(frame, 0, 0, 1, 1, 0, 0, 0, 0)
-	var heart := TextureRect.new()
-	heart.texture = Art.UI.icon_heart
-	heart.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	heart.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	heart.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hearts_box.add_child(heart); _place_px(heart, 0.05, 0.2, 0.17, 0.72, 0, 0, 0, 0)
-	hp_chunk = NinePatchRect.new(); hp_chunk.texture = Art.UI.hp_lag
-	hp_fill = NinePatchRect.new(); hp_fill.texture = Art.UI.hp_fill
-	var fill_material := ShaderMaterial.new()
-	fill_material.shader = preload("res://shaders/hp_fill.gdshader")
-	hp_fill.material = fill_material
-	for cr in [hp_chunk, hp_fill]:
-		cr.patch_margin_left = 20; cr.patch_margin_right = 20
-		cr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		hearts_box.add_child(cr)
-		_place_px(cr, 0, 0.236, 0, 0.673, 0, 0, 0, 0)
-	lbl_hp = Label.new()
-	lbl_hp.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_hp.add_theme_font_size_override("font_size", int(24 * UI))
-	lbl_hp.add_theme_color_override("font_outline_color", Color("071329"))
-	lbl_hp.add_theme_constant_override("outline_size", 3)
-	var hp_plate := StyleBoxFlat.new()
-	hp_plate.bg_color = Color(0.025, 0.045, 0.1, 0.82)
-	hp_plate.set_corner_radius_all(10)
-	lbl_hp.add_theme_stylebox_override("normal", hp_plate)
-	lbl_hp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl_hp.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	lbl_hp.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hearts_box.add_child(lbl_hp); _place_px(lbl_hp, 0.42, 0.1, 0.94, 0.8, 0, 0, 0, 0)
-	lbl_shield = Label.new()
-	lbl_shield.add_theme_font_override("font", Assets.FONT_HUD)
-	lbl_shield.add_theme_font_size_override("font_size", int(22 * UI))
-	lbl_shield.add_theme_color_override("font_color", Color(0.35, 0.6, 0.95))
-	lbl_shield.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	lbl_shield.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hearts_box.add_child(lbl_shield); _place_px(lbl_shield, 1, 0, 1, 1, 6, 0, 90, 0)
-	shield_box = NinePatchRect.new()
-	shield_box.texture = Art.UI.shield_counter_panel
-	shield_box.patch_margin_left = 43; shield_box.patch_margin_right = 43
-	shield_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(shield_box)
-	lbl_boss = _label(32, HORIZONTAL_ALIGNMENT_CENTER)
-	_ink(lbl_boss)
-	lbl_boss.reparent(shield_box, false)
-	_place_px(lbl_boss, 0.05, 0, 0.95, 0.88, 0, 0, 0, 0)
-	shield_box.visible = false
-	judge = TextureRect.new()
-	judge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	judge.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	hud.add_child(judge)
-	judge.modulate.a = 0.0
-	go_box = TextureRect.new()
-	(go_box as TextureRect).texture = Art.UI.countdown_bg_go
-	(go_box as TextureRect).expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	go_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(go_box)
-	var gl := Label.new()
-	gl.text = "GO!"
-	gl.add_theme_font_override("font", Assets.FONT_HUD)
-	gl.add_theme_color_override("font_outline_color", INK)
-	gl.add_theme_constant_override("outline_size", 8)
-	gl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	gl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	gl.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	go_box.add_child(gl); _place_px(gl, 0, 0, 1, 1, 0, 0, 0, 0)
-	go_box.modulate.a = 0.0
-	lbl_speed = _label(28, HORIZONTAL_ALIGNMENT_CENTER); _place(lbl_speed, 0.5, 1, 0.5, 1, -115, -90, 115, -36)
-	combo_badge = NinePatchRect.new()
-	combo_badge.texture = Art.UI.combo_badge
-	combo_badge.patch_margin_left = 40; combo_badge.patch_margin_right = 40
-	combo_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hud.add_child(combo_badge)
-	lbl_combo = _label(40, HORIZONTAL_ALIGNMENT_CENTER)
-	_ink(lbl_combo)
-	lbl_combo.reparent(combo_badge, false)
-	_place_px(lbl_combo, 0, 0, 1, 0.88, 0, 0, 0, 0)
+	for text in [lbl_hp, lbl_shield]:
+		text.reparent(hearts_box, false)
+	_place_px(lbl_hp, 0, 0, 0.75, 0.77, 0, 0, 0, 0)
+	_place_px(lbl_shield, 0.75, 0, 1, 0.77, 0, 0, 0, 0)
+	var hp_track := ColorRect.new()
+	hp_track.color = Color("252f40")
+	hp_track.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hearts_box.add_child(hp_track)
+	_place_px(hp_track, 0, 0.83, 1, 1, 0, 0, 0, 0)
+	hp_chunk = ColorRect.new()
+	hp_chunk.color = Color("96665c")
+	hp_fill = ColorRect.new()
+	hp_fill.color = Color("c6a57d")
+	for bar in [hp_chunk, hp_fill]:
+		bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hearts_box.add_child(bar)
+		_place_px(bar, 0, 0.83, 0, 1, 0, 0, 0, 0)
+	for label in [lbl_time, lbl_count, lbl_hp, lbl_shield, lbl_boss, lbl_combo]:
+		_ink(label)
+		label.add_theme_color_override("font_color", MUTED)
+
+	lbl_speed = _label(24, HORIZONTAL_ALIGNMENT_CENTER)
+	_ink(lbl_speed)
 	speedo = Control.new()
 	speedo.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(speedo)
-	var spn := TextureRect.new(); spn.texture = Art.UI.speedo_panel
-	spn.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	spn.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	speedo.add_child(spn); _place_px(spn, 0, 0, 1, 1, 0, 0, 0, 0)
-	speedo_needle = TextureRect.new(); speedo_needle.texture = Art.UI.speedo_needle
-	speedo_needle.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	speedo_needle.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	speedo.add_child(speedo_needle)
-	lbl_speed.reparent(speedo)
-	_ink(lbl_speed)
-	lbl_speed.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl_hint = _label(96, HORIZONTAL_ALIGNMENT_CENTER)
-	lbl_hint.add_theme_color_override("font_color", Color(1.0, 0.95, 0.6))
-	lbl_float = _label(42)
-	lbl_notice = _label(42, HORIZONTAL_ALIGNMENT_CENTER)
-	lbl_notice.add_theme_color_override("font_color", INK)
-	lbl_notice.add_theme_color_override("font_outline_color", Color("fff8eb"))
-	lbl_notice.add_theme_constant_override("outline_size", 9)
+	lbl_speed.reparent(speedo, false)
+	_place_px(lbl_speed, 0, 0, 1, 1, 0, 0, 0, 0)
+
+	lbl_notice = _label(22, HORIZONTAL_ALIGNMENT_CENTER)
+	lbl_notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl_float = _label(22, HORIZONTAL_ALIGNMENT_CENTER)
+	lbl_float.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	judge = _label(40, HORIZONTAL_ALIGNMENT_CENTER)
+	judge.modulate.a = 0.0
+	go_box = _label(22, HORIZONTAL_ALIGNMENT_CENTER)
+	go_box.text = "GO"
+	go_box.modulate.a = 0.0
+	for label in [lbl_notice, lbl_float, judge, go_box]:
+		_ink(label)
+
+	lbl_listen = _label(25, HORIZONTAL_ALIGNMENT_CENTER)
+	lbl_hint = _label(49, HORIZONTAL_ALIGNMENT_CENTER, Art.FONT_KANA)
+	for label in [lbl_listen, lbl_hint]:
+		_ink(label)
+		label.add_theme_stylebox_override("normal", _paper_style(0.0))
+	lbl_listen.add_theme_color_override("font_color", AMBER)
+	lbl_listen.add_theme_stylebox_override("normal", _surface(Color("141c27"), Color("655343"), 0.0))
+
 	var ready := _panel_center()
 	ready_box = ready[0]
-	_place_px(ready_box, 0, 0.04, 1, 0.56, 0, 0, 0, 0)
-	ready_title = _label(40, HORIZONTAL_ALIGNMENT_CENTER)
-	lbl_center = _label(31, HORIZONTAL_ALIGNMENT_CENTER)
-	ready_knowledge = _label(27, HORIZONTAL_ALIGNMENT_CENTER)
+	ready_title = _label(38, HORIZONTAL_ALIGNMENT_LEFT)
+	lbl_center = _label(26, HORIZONTAL_ALIGNMENT_LEFT)
+	ready_knowledge = _label(23, HORIZONTAL_ALIGNMENT_LEFT)
 	for label in [ready_title, lbl_center, ready_knowledge]:
 		label.reparent(ready[1], false)
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_ink(label)
-	ready_title.add_theme_color_override("font_color", Color(0.1, 0.95, 1.0))
-	ready_knowledge.add_theme_color_override("font_color", Color(0.85, 0.92, 1.0))
+	ready_title.add_theme_color_override("font_color", AMBER)
+	ready_knowledge.add_theme_color_override("font_color", MUTED)
 	ready_box.hide()
-	lbl_dev = _label(22, HORIZONTAL_ALIGNMENT_LEFT, Assets.FONT_UI); _place(lbl_dev, 1, 0, 1, 0, -340, 240, -10, 530)
+
+	lbl_dev = _label(22, HORIZONTAL_ALIGNMENT_LEFT, Assets.FONT_UI)
+	_place(lbl_dev, 1, 0, 1, 0, -340, 300, -10, 600)
 	lbl_dev.vertical_alignment = VERTICAL_ALIGNMENT_TOP
-	lbl_dev.add_theme_color_override("font_color", Color(0.6, 1.0, 0.6))
-	# touch buttons (hit-tested by hand in _input so several fingers work at once)
-	btn_brake = _touch_button("煞車", 40, "btn_brake"); _place(btn_brake, 0, 1, 0, 1, 24, -244, 224, -44)
-	btn_accel = _touch_button("加速", 48, "btn_accel"); _place(btn_accel, 1, 1, 1, 1, -264, -284, -24, -44)
-	btn_pause = _touch_button("", 40, "btn_pause"); _place(btn_pause, 1, 0, 1, 0, -120, 16, -24, 112)
-	btn_voice = _touch_button("重播", 30, "btn_secondary", 32); _place(btn_voice, 1, 0, 1, 0, -120, 124, -24, 220)
-	btn_lock = _touch_button("鎖定", 34, "btn_lock"); _place(btn_lock, 1, 1, 1, 1, -200, -430, -64, -294)
-	# brake / accel labels sit in the lower 30 % (icon above); lock labels on the right half (x 80-150 of 160)
-	for bt in [btn_brake, btn_accel]:
-		_place_px(bt.get_child(0), 0, 0.6, 1, 0.94, 0, 0, 0, 0)
-	_place_px(btn_lock.get_child(0), 0.48, 0.52, 0.96, 0.9, 0, 0, 0, 0)
+	btn_brake = _touch_button("煞車", 28, "btn_brake")
+	btn_accel = _touch_button("加速", 28, "btn_accel")
+	btn_pause = _touch_button("暫停", 28, "btn_pause")
+	btn_voice = _touch_button("重播", 28, "btn_secondary")
+	btn_lock = _touch_button("鎖定", 26, "btn_lock")
 	lbl_lock_kmh = Label.new()
 	lbl_lock_kmh.add_theme_font_override("font", Assets.FONT_HUD)
 	lbl_lock_kmh.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl_lock_kmh.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	lbl_lock_kmh.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_ink(lbl_lock_kmh)
-	btn_lock.add_child(lbl_lock_kmh); _place_px(lbl_lock_kmh, 0.48, 0.1, 0.96, 0.55, 0, 0, 0, 0)
-	for bt in [btn_lock, btn_voice]:
-		_ink(bt.get_child(0))
-	lbl_badge_brake = _create_pad_badge(btn_brake, "B", "S", Color(1.0, 0.35, 0.45))
-	_place_px(lbl_badge_brake, 0.72, 0.06, 0.98, 0.34, 0, 0, 0, 0)
-	lbl_badge_accel = _create_pad_badge(btn_accel, "A", "W", Color(0.2, 1.0, 0.6))
-	_place_px(lbl_badge_accel, 0.72, 0.06, 0.98, 0.34, 0, 0, 0, 0)
-	lbl_badge_voice = _create_pad_badge(btn_voice, "Y", "E", Color(1.0, 0.9, 0.2))
-	_place_px(lbl_badge_voice, 0.05, 0.08, 0.45, 0.45, 0, 0, 0, 0)
-	lbl_badge_lock = _create_pad_badge(btn_lock, "X", "F", Color(0.3, 0.75, 1.0))
-	_place_px(lbl_badge_lock, 0.05, 0.08, 0.45, 0.45, 0, 0, 0, 0)
-	pad_bar = Label.new()
+	btn_lock.add_child(lbl_lock_kmh)
+	_place_px(lbl_lock_kmh, 0.64, 0, 0.97, 1, 0, 0, 0, 0)
+	lbl_badge_brake = _create_pad_badge(btn_brake, "B", "S", MUTED)
+	lbl_badge_accel = _create_pad_badge(btn_accel, "A", "W", MUTED)
+	lbl_badge_voice = _create_pad_badge(btn_voice, "Y", "E", MUTED)
+	lbl_badge_lock = _create_pad_badge(btn_lock, "X", "F", MUTED)
+	for badge in [lbl_badge_brake, lbl_badge_accel, lbl_badge_voice, lbl_badge_lock]:
+		_place_px(badge, 0.05, 0, 0.23, 1, 0, 0, 0, 0)
+	for button in [btn_accel, btn_brake, btn_voice]:
+		_place_px(button.get_child(0), 0.24, 0, 0.96, 1, 0, 0, 0, 0)
+	_place_px(btn_lock.get_child(0), 0.24, 0, 0.64, 1, 0, 0, 0, 0)
+
+	pad_bar = _label(17, HORIZONTAL_ALIGNMENT_CENTER)
 	pad_bar.name = "PadBar"
-	pad_bar.add_theme_font_override("font", Assets.FONT_HUD)
-	pad_bar.add_theme_font_size_override("font_size", 22)
-	pad_bar.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	pad_bar.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	pad_bar.add_theme_color_override("font_color", Color(0.35, 0.95, 1.0, 0.95))
-	pad_bar.add_theme_color_override("font_outline_color", Color(0.02, 0.02, 0.06, 0.95))
-	pad_bar.add_theme_constant_override("outline_size", 6)
-	pad_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	pad_bar.visible = false
-	hud.add_child(pad_bar)
-	_place(pad_bar, 0, 1, 1, 1, 0, -38, 0, -4)
+	_ink(pad_bar)
+	pad_bar.hide()
 	_layout_touch()
 	get_viewport().size_changed.connect(_layout_touch)
-	# full-screen backgrounds for level select / results (batch04), shown in _update_hud
-	sel_bg = TextureRect.new(); sel_bg.texture = Art.UI.select_bg
-	res_bg = TextureRect.new(); res_bg.texture = Art.UI.result_bg
-	for bg in [sel_bg, res_bg]:
-		bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-		bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		bg.visible = false
-		hud.add_child(bg); _place_px(bg, 0, 0, 1, 1, 0, 0, 0, 0)
 	# pause menu
 	var pm := _panel_center()
 	pause_box = pm[0]
@@ -1291,7 +1090,7 @@ func _build_hud() -> void:
 	pt.add_theme_font_override("font", Assets.FONT_HUD)
 	pt.add_theme_font_size_override("font_size", int(48 * UI))
 	pt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	pt.add_theme_color_override("font_color", Color(0.1, 0.95, 1.0))
+	pt.add_theme_color_override("font_color", AMBER)
 	pt.add_theme_color_override("font_outline_color", Color(0.04, 0.03, 0.08, 0.95))
 	pt.add_theme_constant_override("outline_size", 6)
 	pm[1].add_child(pt)
@@ -1303,7 +1102,7 @@ func _build_hud() -> void:
 	var mode_hbox := HBoxContainer.new()
 	mode_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	mode_hbox.add_theme_constant_override("separation", 12)
-	mode_hbox.custom_minimum_size = Vector2(580, 84)
+	mode_hbox.custom_minimum_size = Vector2.ZERO
 
 	btn_mode_pause_race = Button.new()
 	btn_mode_pause_race.text = "賽車 (按住)"
@@ -1326,9 +1125,9 @@ func _build_hud() -> void:
 		b.button_group = pause_mode_choices
 		mode_hbox.add_child(b)
 
-	_art_button(btn_resume, "btn_continue", 0, 130, Vector2(580, 130))
-	_art_button(btn_restart, "btn_restart", 0, 110, Vector2(580, 110))
-	_art_button(btn_quit, "btn_stage_select", 0, 110, Vector2(580, 110))
+	_style_button(btn_resume, "btn_continue")
+	_style_button(btn_restart, "btn_restart")
+	_style_button(btn_quit, "btn_stage_select")
 
 	pm[1].add_child(mode_hbox)
 	for b in [btn_quit, btn_restart, btn_resume]:   # continue at the bottom (thumb zone)
@@ -1353,8 +1152,8 @@ func _build_hud() -> void:
 		var psb := StyleBoxFlat.new()
 		psb.bg_color = Color(0.04, 0.05, 0.11, 0.95)
 		psb.border_width_left = 2; psb.border_width_top = 2; psb.border_width_right = 2; psb.border_width_bottom = 2
-		psb.border_color = Color(0.2, 0.85, 1.0, 0.75)
-		psb.set_corner_radius_all(14)
+		psb.border_color = Color(AMBER, 0.75)
+
 		psb.set_content_margin_all(18)
 		pc_set.add_theme_stylebox_override("panel", psb)
 
@@ -1377,8 +1176,8 @@ func _build_hud() -> void:
 	var m_sb := StyleBoxFlat.new()
 	m_sb.bg_color = Color(0.06, 0.08, 0.16, 0.85)
 	m_sb.border_width_left = 2; m_sb.border_width_top = 2; m_sb.border_width_right = 2; m_sb.border_width_bottom = 2
-	m_sb.border_color = Color(0.2, 0.75, 1.0, 0.45)
-	m_sb.set_corner_radius_all(10)
+	m_sb.border_color = Color(AMBER, 0.45)
+
 	m_sb.set_content_margin_all(10)
 	mode_card.add_theme_stylebox_override("panel", m_sb)
 	st[1].add_child(mode_card)
@@ -1391,7 +1190,7 @@ func _build_hud() -> void:
 	lbl_mode_head.text = "【 操控方案 CONTROL MODE 】"
 	lbl_mode_head.add_theme_font_override("font", Assets.FONT_HUD)
 	lbl_mode_head.add_theme_font_size_override("font_size", int(14 * UI))
-	lbl_mode_head.add_theme_color_override("font_color", Color(0.3, 0.9, 1.0))
+	lbl_mode_head.add_theme_color_override("font_color", AMBER)
 	mode_vb.add_child(lbl_mode_head)
 
 	var mode_choices := ButtonGroup.new()
@@ -1400,7 +1199,7 @@ func _build_hud() -> void:
 		b.add_theme_font_size_override("font_size", int(24 * UI))
 		b.toggle_mode = true
 		b.button_group = mode_choices
-		_art_button(b, "btn_primary", 32)
+		_style_button(b, "btn_primary")
 		mode_vb.add_child(b)
 
 	# Category 2: Audio Volume Card
@@ -1409,7 +1208,7 @@ func _build_hud() -> void:
 	v_sb.bg_color = Color(0.06, 0.08, 0.16, 0.85)
 	v_sb.border_width_left = 2; v_sb.border_width_top = 2; v_sb.border_width_right = 2; v_sb.border_width_bottom = 2
 	v_sb.border_color = Color(0.3, 0.9, 0.6, 0.45)
-	v_sb.set_corner_radius_all(10)
+
 	v_sb.set_content_margin_all(10)
 	vol_card.add_theme_stylebox_override("panel", v_sb)
 	st[1].add_child(vol_card)
@@ -1418,8 +1217,8 @@ func _build_hud() -> void:
 	vol_vb.add_theme_constant_override("separation", 6)
 	vol_card.add_child(vol_vb)
 
-	var lbl_vol_head := Label.new()
-	lbl_vol_head.text = "【 音訊音量 AUDIO VOLUME 】"
+	lbl_vol_head = Label.new()
+	lbl_vol_head.text = I18n.t("SET_VOL_HEAD", "音量")
 	lbl_vol_head.add_theme_font_override("font", Assets.FONT_HUD)
 	lbl_vol_head.add_theme_font_size_override("font_size", int(14 * UI))
 	lbl_vol_head.add_theme_color_override("font_color", Color(0.3, 0.95, 0.6))
@@ -1432,7 +1231,7 @@ func _build_hud() -> void:
 	for b in [btn_vol_bgm, btn_vol_sfx, btn_vol_voice]:
 		b.custom_minimum_size = Vector2(180, 72) * UI
 		b.add_theme_font_size_override("font_size", int(20 * UI))
-		_art_button(b, "btn_secondary", 32)
+		_style_button(b, "btn_secondary")
 		vol_hbox.add_child(b)
 
 	# Category 3: System Preferences Card
@@ -1441,7 +1240,7 @@ func _build_hud() -> void:
 	o_sb.bg_color = Color(0.06, 0.08, 0.16, 0.85)
 	o_sb.border_width_left = 2; o_sb.border_width_top = 2; o_sb.border_width_right = 2; o_sb.border_width_bottom = 2
 	o_sb.border_color = Color(0.85, 0.45, 1.0, 0.45)
-	o_sb.set_corner_radius_all(10)
+
 	o_sb.set_content_margin_all(10)
 	opt_card.add_theme_stylebox_override("panel", o_sb)
 	st[1].add_child(opt_card)
@@ -1450,8 +1249,8 @@ func _build_hud() -> void:
 	opt_vb.add_theme_constant_override("separation", 6)
 	opt_card.add_child(opt_vb)
 
-	var lbl_opt_head := Label.new()
-	lbl_opt_head.text = "【 系統偏好 PREFERENCES 】"
+	lbl_opt_head = Label.new()
+	lbl_opt_head.text = I18n.t("SET_OPT_HEAD", "偏好")
 	lbl_opt_head.add_theme_font_override("font", Assets.FONT_HUD)
 	lbl_opt_head.add_theme_font_size_override("font_size", int(14 * UI))
 	lbl_opt_head.add_theme_color_override("font_color", Color(0.85, 0.5, 1.0))
@@ -1465,24 +1264,58 @@ func _build_hud() -> void:
 	btn_lang = _button("語言")
 	btn_lang.custom_minimum_size = Vector2(180, 72) * UI
 	btn_lang.add_theme_font_size_override("font_size", int(20 * UI))
-	_art_button(btn_lang, "btn_secondary", 32)
+	_style_button(btn_lang, "btn_secondary")
 	opt_hbox.add_child(btn_lang)
 
 	btn_vibration = _button("震動")
 	btn_vibration.custom_minimum_size = Vector2(180, 72) * UI
 	btn_vibration.add_theme_font_size_override("font_size", int(20 * UI))
-	_art_button(btn_vibration, "btn_secondary", 32)
+	_style_button(btn_vibration, "btn_secondary")
 	opt_hbox.add_child(btn_vibration)
 
 	btn_hit_pitch = _button("")
 	btn_hit_pitch.custom_minimum_size = Vector2(180, 72) * UI
 	btn_hit_pitch.add_theme_font_size_override("font_size", int(20 * UI))
-	_art_button(btn_hit_pitch, "btn_secondary", 32)
+	_style_button(btn_hit_pitch, "btn_secondary")
 	opt_hbox.add_child(btn_hit_pitch)
+
+	var assist_hbox := HBoxContainer.new()
+	assist_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	assist_hbox.add_theme_constant_override("separation", 8)
+	opt_vb.add_child(assist_hbox)
+	btn_motion = _button("")
+	btn_show_kana = _button("")
+	btn_assist_power = _button("")
+	for button in [btn_motion, btn_show_kana, btn_assist_power]:
+		button.custom_minimum_size = Vector2(180, 72) * UI
+		button.add_theme_font_size_override("font_size", int(18 * UI))
+		_style_button(button, "btn_secondary")
+		assist_hbox.add_child(button)
+	btn_motion.pressed.connect(func():
+		save.set_setting("reduced_motion", not _reduced_motion())
+		_persist_progress()
+		_update_assist_buttons()
+	)
+	btn_show_kana.pressed.connect(func():
+		save.set_setting("show_kana", not _show_kana_assist())
+		_persist_progress()
+		_update_assist_buttons()
+	)
+	btn_assist_power.pressed.connect(func():
+		save.set_setting("assist_power", not _power_assist())
+		if not _power_assist():
+			set_max_hp_bonus(0, false)
+			set_damage_reduction(0.0)
+			shield = 0
+			_emit_hp()
+		_persist_progress()
+		_apply_upgrades_from_save()
+		_update_assist_buttons()
+	)
 
 	btn_settings_back.custom_minimum_size = Vector2(560, 76) * UI
 	btn_settings_back.add_theme_font_size_override("font_size", int(26 * UI))
-	_art_button(btn_settings_back, "btn_secondary", 32)
+	_style_button(btn_settings_back, "btn_secondary")
 	st[1].add_child(btn_settings_back)
 
 	btn_mode_race.pressed.connect(func(): set_speed_mode("race"))
@@ -1522,11 +1355,12 @@ func _build_hud() -> void:
 	_update_vol_buttons()
 	_update_vibration_button()
 	_update_hit_pitch_button()
+	_update_assist_buttons()
 	_wire_settings_focus()
 	settings_box.visible = false
 	_build_results()
 	# level select
-	var sp := _panel_center("")
+	var sp := _panel_center(false)
 	select_box = sp[0]
 	select_list = sp[1]
 	select_box.visible = false
@@ -1545,20 +1379,25 @@ func _layout_menus() -> void:
 	var view := get_viewport().get_visible_rect().size
 	var short_side := minf(view.x, view.y)
 	var height := short_side * 0.115
-	lbl_pause_title.add_theme_font_size_override("font_size", roundi(short_side * 0.075))
+	var wide := view.x >= view.y * 1.25
+	var inset := get_safe_insets()
+	var pause_w := short_side * (0.42 if wide else 0.71)
+	var pause_left: float = float(inset.left) + short_side * 0.039 if wide else view.x * 0.5 - (pause_w + 64.0) * 0.5
+	var pause_top: float = float(inset.top) + (view.y * 0.16 if wide else short_side * 0.075)
+	_place_px(pause_box, 0, 0, 0, 0, pause_left, pause_top, pause_left + pause_w + 64.0, pause_top)
+	lbl_pause_title.add_theme_font_size_override("font_size", roundi(short_side * 0.064))
 	for button in [btn_resume, btn_restart, btn_quit]:
-		button.custom_minimum_size = Vector2(short_side * 0.7, height)
-		button.add_theme_font_size_override("font_size", roundi(short_side * 0.045))
-	btn_resume.custom_minimum_size.y = short_side * 0.14
+		button.custom_minimum_size = Vector2(pause_w, height)
+		button.add_theme_font_size_override("font_size", roundi(short_side * 0.041))
 	for button in [btn_mode_pause_race, btn_mode_pause_step]:
-		button.custom_minimum_size = Vector2(short_side * 0.34, height)
-		button.add_theme_font_size_override("font_size", roundi(short_side * 0.042))
+		button.custom_minimum_size = Vector2((pause_w - 12.0) * 0.5, height)
+		button.add_theme_font_size_override("font_size", roundi(short_side * 0.030))
 	lbl_settings_mode.add_theme_font_size_override("font_size", roundi(short_side * 0.06))
 	for button in [btn_mode_race, btn_mode_step, btn_settings_back]:
 		button.custom_minimum_size = Vector2(short_side * 0.88, height)
 		button.add_theme_font_size_override("font_size", roundi(short_side * 0.042))
 	var opt_w := (short_side * 0.88 - 16.0) / 3.0
-	for button in [btn_lang, btn_vibration, btn_hit_pitch]:
+	for button in [btn_lang, btn_vibration, btn_hit_pitch, btn_motion, btn_show_kana, btn_assist_power]:
 		if button != null and is_instance_valid(button):
 			button.custom_minimum_size = Vector2(opt_w, height)
 			button.add_theme_font_size_override("font_size", roundi(short_side * 0.026))
@@ -1596,7 +1435,7 @@ func _result_label(text: String, font_size: int) -> Label:
 	_ink(label)
 	return label
 
-func _make_cyber_stat_card(title_text: String, icon_accent: Color) -> Array:
+func _make_result_stat(title_text: String) -> Array:
 	var pc := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color(0.04, 0.05, 0.12, 0.92)
@@ -1604,8 +1443,8 @@ func _make_cyber_stat_card(title_text: String, icon_accent: Color) -> Array:
 	sb.border_width_top = 1
 	sb.border_width_right = 1
 	sb.border_width_bottom = 1
-	sb.border_color = icon_accent * 0.85
-	sb.set_corner_radius_all(8)
+	sb.border_color = Color("665347")
+
 	sb.set_content_margin_all(8)
 	pc.add_theme_stylebox_override("panel", sb)
 
@@ -1617,7 +1456,7 @@ func _make_cyber_stat_card(title_text: String, icon_accent: Color) -> Array:
 	title.text = title_text
 	title.add_theme_font_override("font", Assets.FONT_HUD)
 	title.add_theme_font_size_override("font_size", 14)
-	title.add_theme_color_override("font_color", icon_accent)
+	title.add_theme_color_override("font_color", AMBER)
 	vb.add_child(title)
 
 	var val := Label.new()
@@ -1640,16 +1479,6 @@ func _build_results() -> void:
 	var res_root: VBoxContainer = r[1]
 	res_root.add_theme_constant_override("separation", 10)
 
-	var pc_main := results_box.get_child(0) as PanelContainer
-	if pc_main != null:
-		var psb := StyleBoxFlat.new()
-		psb.bg_color = Color(0.04, 0.05, 0.11, 0.95)
-		psb.border_width_left = 2; psb.border_width_top = 2; psb.border_width_right = 2; psb.border_width_bottom = 2
-		psb.border_color = Color(0.2, 0.85, 1.0, 0.75)
-		psb.set_corner_radius_all(14)
-		psb.set_content_margin_all(20)
-		pc_main.add_theme_stylebox_override("panel", psb)
-
 	# Split container: HBox in landscape (side-by-side decks), VBox in portrait (stacked)
 	res_split_box = BoxContainer.new()
 	res_split_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1665,12 +1494,12 @@ func _build_results() -> void:
 	res_chip_stage = Label.new()
 	res_chip_stage.add_theme_font_override("font", Assets.FONT_HUD)
 	res_chip_stage.add_theme_font_size_override("font_size", 16)
-	res_chip_stage.add_theme_color_override("font_color", Color(0.3, 0.9, 1.0))
+	res_chip_stage.add_theme_color_override("font_color", AMBER)
 	var chip_sb := StyleBoxFlat.new()
 	chip_sb.bg_color = Color(0.08, 0.12, 0.22, 0.85)
 	chip_sb.border_width_left = 1; chip_sb.border_width_top = 1; chip_sb.border_width_right = 1; chip_sb.border_width_bottom = 1
-	chip_sb.border_color = Color(0.2, 0.85, 1.0, 0.6)
-	chip_sb.set_corner_radius_all(8)
+	chip_sb.border_color = Color(AMBER, 0.6)
+
 	chip_sb.set_content_margin_all(6)
 	res_chip_stage.add_theme_stylebox_override("normal", chip_sb)
 	res_chip_stage.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1691,7 +1520,7 @@ func _build_results() -> void:
 	rank_style.bg_color = Color(0.05, 0.06, 0.14, 0.95)
 	rank_style.border_width_left = 2; rank_style.border_width_top = 2; rank_style.border_width_right = 2; rank_style.border_width_bottom = 2
 	rank_style.border_color = Color(0.18, 0.88, 1.0)
-	rank_style.set_corner_radius_all(14)
+
 	rank_style.set_content_margin_all(8)
 	rank_box.add_theme_stylebox_override("panel", rank_style)
 	rank_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -1726,16 +1555,14 @@ func _build_results() -> void:
 	res_stars.add_theme_constant_override("separation", 8)
 	res_left_deck.add_child(res_stars)
 	for i in 3:
-		var stx := TextureRect.new()
-		stx.texture = Art.UI.star_empty_200
-		stx.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		stx.custom_minimum_size = Vector2(48, 48)
-		res_stars.add_child(stx)
+		var star := _result_label("☆", 36)
+		star.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		star.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		star.add_theme_color_override("font_color", AMBER)
+		res_stars.add_child(star)
 
-	res_badge = TextureRect.new()
-	res_badge.texture = Art.UI.badge_new_record
-	res_badge.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	res_badge.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	res_badge = Panel.new()
+	res_badge.add_theme_stylebox_override("panel", _surface(Color("41332d"), AMBER))
 	res_badge.custom_minimum_size = Vector2(130, 44)
 	res_badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	res_badge.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -1759,19 +1586,19 @@ func _build_results() -> void:
 	res_cards_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	res_right_deck.add_child(res_cards_grid)
 
-	var c_time := _make_cyber_stat_card("◎ 結算用時", Color(0.2, 0.85, 1.0))
+	var c_time := _make_result_stat("◎ 結算用時")
 	res_card_time = c_time[0]; lbl_card_time_val = c_time[1]; lbl_card_time_sub = c_time[2]
 	res_cards_grid.add_child(res_card_time)
 
-	var c_acc := _make_cyber_stat_card("★ 命中答對", Color(0.3, 0.95, 0.6))
+	var c_acc := _make_result_stat("★ 命中答對")
 	res_card_acc = c_acc[0]; lbl_card_acc_val = c_acc[1]; lbl_card_acc_sub = c_acc[2]
 	res_cards_grid.add_child(res_card_acc)
 
-	var c_combo := _make_cyber_stat_card("▲ 疾走表現", Color(1.0, 0.75, 0.2))
+	var c_combo := _make_result_stat("▲ 疾走表現")
 	res_card_combo = c_combo[0]; lbl_card_combo_val = c_combo[1]; lbl_card_combo_sub = c_combo[2]
 	res_cards_grid.add_child(res_card_combo)
 
-	var c_pts := _make_cyber_stat_card("◆ 獲得點數", Color(0.85, 0.45, 1.0))
+	var c_pts := _make_result_stat("◆ 獲得點數")
 	res_card_pts = c_pts[0]; lbl_card_pts_val = c_pts[1]; lbl_card_pts_sub = c_pts[2]
 	res_cards_grid.add_child(res_card_pts)
 
@@ -1780,7 +1607,7 @@ func _build_results() -> void:
 	wsb.bg_color = Color(0.08, 0.05, 0.10, 0.85)
 	wsb.border_width_left = 1; wsb.border_width_top = 1; wsb.border_width_right = 1; wsb.border_width_bottom = 1
 	wsb.border_color = Color(1.0, 0.4, 0.3, 0.6)
-	wsb.set_corner_radius_all(8)
+
 	wsb.set_content_margin_all(8)
 	res_weak_box.add_theme_stylebox_override("panel", wsb)
 	res_weak_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1810,7 +1637,7 @@ func _build_results() -> void:
 	knsb.bg_color = Color(0.05, 0.08, 0.16, 0.85)
 	knsb.border_width_left = 1; knsb.border_width_top = 1; knsb.border_width_right = 1; knsb.border_width_bottom = 1
 	knsb.border_color = Color(0.2, 0.7, 0.9, 0.4)
-	knsb.set_corner_radius_all(8)
+
 	knsb.set_content_margin_all(8)
 	res_knowledge_box.add_theme_stylebox_override("panel", knsb)
 	res_knowledge_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1836,14 +1663,14 @@ func _build_results() -> void:
 	btn_select = _button(I18n.t("BTN_SELECT", "回選關"))
 	btn_save_retry = _button(I18n.t("BTN_SAVE_RETRY", "重試存檔"))
 	btn_kata_next = _button(I18n.t("BTN_START_KATA", "開始片假名"))
-	_art_button(btn_save_retry, "btn_small", 32)
-	_art_button(btn_kata_next, "btn_next")
+	_style_button(btn_save_retry, "btn_small")
+	_style_button(btn_kata_next, "btn_next")
 	btn_save_retry.visible = false
 	btn_kata_next.visible = false
-	_art_button(btn_next, "btn_next")
-	_art_button(btn_review, "btn_primary", 32)
-	_art_button(btn_retry, "btn_retry")
-	_art_button(btn_select, "btn_secondary", 32)
+	_style_button(btn_next, "btn_next")
+	_style_button(btn_review, "btn_primary")
+	_style_button(btn_retry, "btn_retry")
+	_style_button(btn_select, "btn_secondary")
 	for button in [btn_next, btn_review, btn_retry, btn_select, btn_save_retry, btn_kata_next]:
 		result_actions.add_child(button)
 
@@ -1890,7 +1717,7 @@ func _build_review() -> void:
 	lbl_review_progress = _result_label("", 46)
 	content.add_child(lbl_review_progress)
 	btn_review_replay = _button(I18n.t("REVIEW_REPLAY", "重播語音"))
-	_art_button(btn_review_replay, "btn_small", 32)
+	_style_button(btn_review_replay, "btn_small")
 	btn_review_replay.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	btn_review_replay.pressed.connect(_replay_review)
 	content.add_child(btn_review_replay)
@@ -1900,7 +1727,7 @@ func _build_review() -> void:
 	content.add_child(choices)
 	for i in lane_count:
 		var button := _button("")
-		_art_button(button, "btn_small", 32)
+		_style_button(button, "btn_small")
 		button.add_theme_font_override("font", Art.FONT_KANA)
 		button.add_theme_font_size_override("font_size", 78)
 		button.pressed.connect(_answer_review.bind(button))
@@ -1915,133 +1742,78 @@ func _build_review() -> void:
 	btn_review_back = _button(I18n.t("REVIEW_BACK", "返回結算"))
 	btn_review_next = _button(I18n.t("REVIEW_NEXT", "下一字"))
 	for button in [btn_review_back, btn_review_next]:
-		_art_button(button, "btn_small", 32)
+		_style_button(button, "btn_small")
 		actions.add_child(button)
 	btn_review_back.pressed.connect(_close_review)
 	btn_review_next.pressed.connect(_advance_review)
 	review_box.visible = false
 
 func _layout_result_cards() -> void:
-	var viewport_size := get_viewport().get_visible_rect().size
-	var landscape := viewport_size.x >= viewport_size.y
-	var insets: Dictionary = get_safe_insets()
-	var touch_height := 56.0 if landscape else 50.0
-	var available_w: float = viewport_size.x - 48.0 - float(insets.left) - float(insets.right)
-	var panel_w: float = clampf(available_w * 0.72, 920.0, 1680.0) if landscape else minf(available_w, 720.0)
+	var view := get_viewport().get_visible_rect().size
+	var wide := view.x >= view.y * 1.25
+	var inset := get_safe_insets()
+	var u := minf(view.x, view.y) / 1080.0
+	var available_w: float = view.x - 80.0 * u - float(inset.left) - float(inset.right)
+	var width := minf(available_w - 64.0, (1360.0 if wide else 870.0) * u)
+	var recap_w := width * 0.35 if wide else width
+	var detail_w := width - recap_w - 28.0 if wide else width
 
-	if is_instance_valid(results_box) and results_box.get_child_count() > 0:
-		var pc := results_box.get_child(0) as Control
-		if pc != null:
-			pc.custom_minimum_size.x = panel_w
+	results_box.get_child(0).custom_minimum_size.x = width + 64.0
+	res_split_box.vertical = not wide
+	res_split_box.add_theme_constant_override("separation", 28 if wide else 24)
+	res_left_deck.custom_minimum_size.x = recap_w
+	res_right_deck.custom_minimum_size.x = detail_w
+	res_chip_stage.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl_result_heading.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	for entry in [[res_chip_stage, 24], [lbl_result_heading, 50], [lbl_res_knowledge, 25], [lbl_rank, 53]]:
+		entry[0].add_theme_font_size_override("font_size", roundi(float(entry[1]) * u))
+	rank_box.custom_minimum_size = Vector2(150.0, 100.0) * u
+	rank_box.pivot_offset = rank_box.custom_minimum_size * 0.5
+	res_badge.custom_minimum_size = Vector2(178.0, 46.0) * u
+	res_badge.get_child(0).add_theme_font_size_override("font_size", roundi(23.0 * u))
+	for star in res_stars.get_children():
+		star.add_theme_font_size_override("font_size", roundi(39.0 * u))
+		star.custom_minimum_size = Vector2(48.0, 48.0) * u
 
-	if is_instance_valid(res_split_box):
-		res_split_box.vertical = not landscape
-		res_split_box.add_theme_constant_override("separation", 24 if landscape else 10)
+	var card_w := (detail_w - 10.0) * 0.5
+	for card in [res_card_time, res_card_acc, res_card_combo, res_card_pts]:
+		card.custom_minimum_size = Vector2(card_w, 110.0 * u)
+		var texts: VBoxContainer = card.get_child(0)
+		for i in texts.get_child_count():
+			var label: Label = texts.get_child(i)
+			label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			label.add_theme_font_size_override("font_size", roundi((33.0 if i == 1 else 23.0) * u))
 
-	if landscape:
-		var left_w := panel_w * 0.35
-		var right_w := panel_w * 0.65 - 24.0
-		if is_instance_valid(res_left_deck):
-			res_left_deck.custom_minimum_size = Vector2(left_w, 0)
-		if is_instance_valid(res_right_deck):
-			res_right_deck.custom_minimum_size = Vector2(right_w, 0)
-		if is_instance_valid(lbl_result_heading):
-			lbl_result_heading.add_theme_font_size_override("font_size", 42)
-		if is_instance_valid(rank_box):
-			rank_box.custom_minimum_size = Vector2(160, 120)
-			rank_box.pivot_offset = rank_box.custom_minimum_size * 0.5
-		if is_instance_valid(lbl_rank):
-			lbl_rank.add_theme_font_size_override("font_size", 54)
-		if is_instance_valid(res_badge):
-			res_badge.custom_minimum_size = Vector2(140, 48)
-			if res_badge.get_child_count() > 0:
-				(res_badge.get_child(0) as Label).add_theme_font_size_override("font_size", 20)
-		if is_instance_valid(res_stars):
-			for st in res_stars.get_children():
-				if st is TextureRect:
-					st.custom_minimum_size = Vector2(52, 52)
-		if is_instance_valid(res_cards_grid):
-			res_cards_grid.columns = 2
-			var card_w := (right_w - 14.0) * 0.5
-			var card_h := 88.0
-			for card in [res_card_time, res_card_acc, res_card_combo, res_card_pts]:
-				if card != null and is_instance_valid(card):
-					card.custom_minimum_size = Vector2(card_w, card_h)
-		if is_instance_valid(result_actions):
-			var action_count := result_actions.get_children().filter(func(b): return b.visible).size()
-			result_actions.columns = action_count if action_count <= 4 else 2
-			var btn_w := (right_w - float(result_actions.columns - 1) * 10.0) / float(maxi(1, result_actions.columns))
-			for button in [btn_retry, btn_next, btn_review, btn_select, btn_save_retry, btn_kata_next]:
-				if button != null and is_instance_valid(button):
-					button.custom_minimum_size = Vector2(btn_w, touch_height)
-					button.add_theme_font_size_override("font_size", 20)
-	else:
-		if is_instance_valid(res_left_deck):
-			res_left_deck.custom_minimum_size = Vector2.ZERO
-		if is_instance_valid(res_right_deck):
-			res_right_deck.custom_minimum_size = Vector2.ZERO
-		if is_instance_valid(lbl_result_heading):
-			lbl_result_heading.add_theme_font_size_override("font_size", 36)
-		if is_instance_valid(rank_box):
-			rank_box.custom_minimum_size = Vector2(100, 48)
-			rank_box.pivot_offset = rank_box.custom_minimum_size * 0.5
-		if is_instance_valid(lbl_rank):
-			lbl_rank.add_theme_font_size_override("font_size", 30)
-		if is_instance_valid(res_badge):
-			res_badge.custom_minimum_size = Vector2(100, 38)
-			if res_badge.get_child_count() > 0:
-				(res_badge.get_child(0) as Label).add_theme_font_size_override("font_size", 16)
-		if is_instance_valid(res_stars):
-			for st in res_stars.get_children():
-				if st is TextureRect:
-					st.custom_minimum_size = Vector2(40, 40)
-		if is_instance_valid(res_cards_grid):
-			res_cards_grid.columns = 2
-			var card_w := (panel_w - 40.0) * 0.5
-			var card_h := 76.0
-			for card in [res_card_time, res_card_acc, res_card_combo, res_card_pts]:
-				if card != null and is_instance_valid(card):
-					card.custom_minimum_size = Vector2(card_w, card_h)
-		if is_instance_valid(result_actions):
-			result_actions.columns = 2
-			var btn_w := (panel_w - 40.0 - 10.0) * 0.5
-			for button in [btn_retry, btn_next, btn_review, btn_select, btn_save_retry, btn_kata_next]:
-				if button != null and is_instance_valid(button):
-					button.custom_minimum_size = Vector2(btn_w, touch_height)
-					button.add_theme_font_size_override("font_size", 18)
-
+	var shown := result_actions.get_children().filter(func(button): return button.visible).size()
+	result_actions.columns = mini(3, maxi(1, shown)) if wide else 2
+	var action_w := (detail_w - float(result_actions.columns - 1) * 10.0) / float(result_actions.columns)
+	var touch_h := 121.0 * u
+	for button in result_actions.get_children():
+		button.custom_minimum_size = Vector2(action_w, touch_h)
+		button.add_theme_font_size_override("font_size", roundi(25.0 * u))
 	for button in [btn_review_back, btn_review_next, btn_review_replay]:
-		if button != null and is_instance_valid(button):
-			button.custom_minimum_size = Vector2(260.0 if landscape else 200.0, touch_height)
-			button.add_theme_font_size_override("font_size", 22 if landscape else 18)
-	var choice_width := minf(220.0 if landscape else 180.0, panel_w / lane_count - 16.0)
+		button.custom_minimum_size = Vector2(235.0 * u, touch_h)
+		button.add_theme_font_size_override("font_size", roundi(25.0 * u))
 	for button in review_choices:
-		if button != null and is_instance_valid(button):
-			button.custom_minimum_size = Vector2(choice_width, touch_height)
-			button.add_theme_font_size_override("font_size", 56 if landscape else 42)
-	if is_instance_valid(lbl_review_heading):
-		lbl_review_heading.add_theme_font_size_override("font_size", 42 if landscape else 32)
+		button.custom_minimum_size = Vector2(184.0, 122.0) * u
+		button.add_theme_font_size_override("font_size", roundi(84.0 * u))
+	lbl_review_heading.add_theme_font_size_override("font_size", roundi(43.0 * u))
 	for label in [lbl_review_progress, lbl_review_feedback]:
-		if label != null and is_instance_valid(label):
-			label.add_theme_font_size_override("font_size", 22 if landscape else 18)
-	if is_instance_valid(lbl_review_feedback):
-		lbl_review_feedback.custom_minimum_size = Vector2(minf(800.0 if landscape else 550.0, viewport_size.x - 48.0), 80.0 if landscape else 60.0)
-		lbl_review_feedback.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.add_theme_font_size_override("font_size", roundi(28.0 * u))
+	lbl_review_feedback.custom_minimum_size = Vector2(minf(750.0 * u, available_w - 64.0), 82.0 * u)
+	lbl_review_feedback.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
-func _touch_button(text: String, size: int, art: String, margin := 0) -> Panel:
+func _touch_button(text: String, size: int, art: String) -> Panel:
 	var p := Panel.new()
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	p.set_meta("art", art)
-	p.set_meta("margin", margin)
-	p.add_theme_stylebox_override("panel", _tex_style(art + ("_off" if art == "btn_lock" else "_normal"), margin))
+	p.add_theme_stylebox_override("panel", _control_style(art + ("_off" if art == "btn_lock" else "_normal")))
 	hud.add_child(p)
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_override("font", Assets.FONT_HUD)
 	l.add_theme_font_size_override("font_size", int(size * UI))
-	l.add_theme_color_override("font_color", Color.WHITE)
-	l.add_theme_color_override("font_outline_color", Color(0.04, 0.03, 0.08, 0.95))
-	l.add_theme_constant_override("outline_size", 8)
+	_ink(l)
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -2072,7 +1844,7 @@ func _set_btn_lit(p: Panel, lit: bool) -> void:
 	var key := (art + ("_on" if lit else "_off")) if art == "btn_lock" else (art + ("_pressed" if lit else "_normal"))
 	if p.get_meta("key", "") != key:
 		p.set_meta("key", key)
-		p.add_theme_stylebox_override("panel", _tex_style(key, int(p.get_meta("margin"))))
+		p.add_theme_stylebox_override("panel", _control_style(key))
 	p.scale = Vector2.ONE
 
 # ---------------------------------------------------------------- HP
@@ -2135,20 +1907,12 @@ func _emit_hp() -> void:
 func _refresh_hp_bar() -> void:
 	if hearts_box == null:
 		return
-	var W := hearts_box.size.x if hearts_box.size.x > 0.0 else 450.0
-	var x0 := W * 101.0 / 500.0; var tw := W * 374.0 / 500.0      # inner track of hp_frame
-	hp_fill.offset_left = x0; hp_chunk.offset_left = x0
-	hp_fill.offset_right = x0 + maxf(1.0, tw * float(hp) / float(max_hp))
-	hp_chunk.offset_right = x0 + maxf(1.0, tw * clampf(hp_delayed, 0.0, float(max_hp)) / float(max_hp))
+	var width := hearts_box.size.x
+	hp_fill.offset_right = width * float(hp) / float(max_hp)
+	hp_chunk.offset_right = width * clampf(hp_delayed, 0.0, float(max_hp)) / float(max_hp)
 	hp_fill.visible = hp > 0
-	lbl_hp.text = "%d / %d" % [hp, max_hp]
-	var ratio := float(hp) / float(max_hp)
-	var warning_tint := Color.TRANSPARENT
-	if ratio <= 0.25:
-		warning_tint = Color("ff526c")
-	elif ratio <= 0.5:
-		warning_tint = Color("ffca63")
-	(hp_fill.material as ShaderMaterial).set_shader_parameter("warning_tint", warning_tint)
+	lbl_hp.text = "HP  %d / %d" % [hp, max_hp]
+	hp_fill.color = Color("d09285") if float(hp) / float(max_hp) <= 0.25 else Color("c6a57d")
 	lbl_shield.text = ("盾%d" % shield) if shield > 0 else ""
 
 ## Flash + shake of the HP widget only (never the camera / screen).
@@ -2255,17 +2019,8 @@ func _refresh_mode_buttons() -> void:
 		return
 	btn_mode_pause.text = "模式：%s ⇄ %s" % [mode_name(), mode_name("race" if speed_mode == "step" else "step")]
 	if btn_mode_pause_race != null and btn_mode_pause_step != null:
-		var race_style := StyleBoxTexture.new()
-		race_style.texture = Art.UI.mode_race_active if speed_mode == "race" else Art.UI.mode_race_inactive
-		for s in ["normal", "hover", "pressed", "hover_pressed", "disabled"]:
-			btn_mode_pause_race.add_theme_stylebox_override(s, race_style)
-		btn_mode_pause_race.add_theme_color_override("font_color", Color(0.96, 0.98, 1.0) if speed_mode == "race" else Color(0.7, 0.72, 0.8))
-
-		var step_style := StyleBoxTexture.new()
-		step_style.texture = Art.UI.mode_step_active if speed_mode == "step" else Art.UI.mode_step_inactive
-		for s in ["normal", "hover", "pressed", "hover_pressed", "disabled"]:
-			btn_mode_pause_step.add_theme_stylebox_override(s, step_style)
-		btn_mode_pause_step.add_theme_color_override("font_color", Color(1.0, 0.96, 0.88) if speed_mode == "step" else Color(0.7, 0.72, 0.8))
+		_style_button(btn_mode_pause_race, "mode")
+		_style_button(btn_mode_pause_step, "mode")
 		(btn_mode_pause_race if speed_mode == "race" else btn_mode_pause_step).button_pressed = true
 	(btn_mode_race if speed_mode == "race" else btn_mode_step).button_pressed = true
 	lbl_settings_mode.text = "◆ 系統設定 · 選用中：%s模式 ◆" % mode_name()
@@ -2284,8 +2039,9 @@ func show_settings() -> void:
 	_update_vol_buttons()
 	_update_vibration_button()
 	_update_hit_pitch_button()
+	_update_assist_buttons()
 	if btn_lang != null:
-		btn_lang.text = "◎ 遊戲語言\n%s" % I18n.LOCALE_NAMES.get(I18n.current_locale, I18n.current_locale)
+		btn_lang.text = I18n.t("LANG_BUTTON_DYNAMIC", "語言\n%s") % I18n.LOCALE_NAMES.get(I18n.current_locale, I18n.current_locale)
 	_wire_settings_focus()
 	_update_pad_bar()
 	_update_title_prompts()
@@ -2297,18 +2053,23 @@ func set_language(loc: String, persist := true) -> void:
 		save.set_setting("locale", loc)
 		_persist_progress()
 	if btn_lang != null:
-		btn_lang.text = "◎ 遊戲語言\n%s" % I18n.LOCALE_NAMES.get(loc, loc)
+		btn_lang.text = I18n.t("LANG_BUTTON_DYNAMIC", "語言\n%s") % I18n.LOCALE_NAMES.get(loc, loc)
+	if lbl_vol_head != null:
+		lbl_vol_head.text = I18n.t("SET_VOL_HEAD", "音量")
+	if lbl_opt_head != null:
+		lbl_opt_head.text = I18n.t("SET_OPT_HEAD", "偏好")
 	if lbl_settings_mode != null:
-		lbl_settings_mode.text = "◆ 系統設定 · 選用中：%s模式 ◆" % mode_name()
+		lbl_settings_mode.text = I18n.t("SET_HEAD", "系統設定 · %s") % mode_name()
 	if btn_mode_race != null:
-		btn_mode_race.text = ("● 賽車模式 (RACING) · 已選用\n長按加速／煞車 · 支援巡航定速" if speed_mode == "race" else "○ 賽車模式 (RACING)\n長按加速／煞車 · 支援巡航定速")
+		btn_mode_race.text = I18n.t("SET_RACE_ON" if speed_mode == "race" else "SET_RACE_OFF", "")
 	if btn_mode_step != null:
-		btn_mode_step.text = ("● 點放模式 (TAP-STEP) · 已選用\n點一下 ±5 km/h · 節奏精準控速" if speed_mode == "step" else "○ 點放模式 (TAP-STEP)\n點一下 ±5 km/h · 節奏精準控速")
+		btn_mode_step.text = I18n.t("SET_STEP_ON" if speed_mode == "step" else "SET_STEP_OFF", "")
 	if btn_settings_back != null:
 		btn_settings_back.text = I18n.t("BTN_SETTINGS_BACK", "返回確認")
 	_update_vol_buttons()
 	_update_vibration_button()
 	_update_hit_pitch_button()
+	_update_assist_buttons()
 	_update_pad_bar()
 	_update_title_prompts()
 	# Pause menu
@@ -2325,6 +2086,10 @@ func set_language(loc: String, persist := true) -> void:
 	if btn_mode_pause_step != null:
 		btn_mode_pause_step.text = I18n.t("MODE_PAUSE_STEP", "點放 ±5")
 	# In-game HUD touch buttons
+	if lbl_listen != null:
+		lbl_listen.text = I18n.t("HUD_LISTEN", "聽音")
+	if btn_pause != null:
+		btn_pause.get_child(0).text = I18n.t("TITLE_PAUSE", "暫停")
 	if btn_accel != null and btn_accel.get_child_count() > 0:
 		var la := btn_accel.get_child(0) as Label
 		if la != null: la.text = I18n.t("HUD_ACCEL", "加速")
@@ -2360,16 +2125,20 @@ func hide_settings() -> void:
 
 func _update_vibration_button() -> void:
 	if btn_vibration != null and is_instance_valid(btn_vibration):
-		var state_str := "開啟 ON" if vibration_enabled else "關閉 OFF"
-		btn_vibration.text = "▲ 震動反饋\n%s" % state_str
+		btn_vibration.text = I18n.t("VIB_ON" if vibration_enabled else "VIB_OFF", "")
 
 func _update_hit_pitch_button() -> void:
 	if btn_hit_pitch != null and is_instance_valid(btn_hit_pitch):
 		var mode := str(save.get_setting("hit_pitch_mode", "pentatonic"))
-		var mode_name := "五聲音階"
-		if mode == "random": mode_name = "隨機音階"
-		elif mode == "fixed": mode_name = "固定音高"
-		btn_hit_pitch.text = "◆ 打擊音階\n%s" % mode_name
+		btn_hit_pitch.text = I18n.t("PITCH_" + mode.to_upper(), "")
+
+func _update_assist_buttons() -> void:
+	if btn_motion != null and is_instance_valid(btn_motion):
+		btn_motion.text = I18n.t("MOTION_ON" if _reduced_motion() else "MOTION_OFF", "")
+	if btn_show_kana != null and is_instance_valid(btn_show_kana):
+		btn_show_kana.text = I18n.t("KANA_ON" if _show_kana_assist() else "KANA_OFF", "")
+	if btn_assist_power != null and is_instance_valid(btn_assist_power):
+		btn_assist_power.text = I18n.t("POWER_ON" if _power_assist() else "POWER_OFF", "")
 
 func _wire_settings_focus() -> void:
 	if btn_mode_race == null or btn_mode_step == null or btn_vol_bgm == null:
@@ -2395,22 +2164,36 @@ func _wire_settings_focus() -> void:
 		btn_lang.focus_neighbor_top = btn_vol_bgm.get_path()
 		if btn_vibration != null:
 			btn_lang.focus_neighbor_right = btn_vibration.get_path()
-		btn_lang.focus_neighbor_bottom = btn_settings_back.get_path()
+		btn_lang.focus_neighbor_bottom = btn_motion.get_path() if btn_motion != null else btn_settings_back.get_path()
 
 	if btn_vibration != null:
 		btn_vibration.focus_neighbor_top = btn_vol_voice.get_path()
 		btn_vibration.focus_neighbor_left = btn_lang.get_path()
 		if btn_hit_pitch != null:
 			btn_vibration.focus_neighbor_right = btn_hit_pitch.get_path()
-		btn_vibration.focus_neighbor_bottom = btn_settings_back.get_path()
+		btn_vibration.focus_neighbor_bottom = btn_show_kana.get_path() if btn_show_kana != null else btn_settings_back.get_path()
 
 	if btn_hit_pitch != null:
 		btn_hit_pitch.focus_neighbor_top = btn_vol_voice.get_path()
 		btn_hit_pitch.focus_neighbor_left = btn_vibration.get_path()
-		btn_hit_pitch.focus_neighbor_bottom = btn_settings_back.get_path()
+		btn_hit_pitch.focus_neighbor_bottom = btn_motion.get_path() if btn_motion != null else btn_settings_back.get_path()
+
+	if btn_motion != null:
+		btn_motion.focus_neighbor_top = btn_lang.get_path()
+		btn_motion.focus_neighbor_right = btn_show_kana.get_path()
+		btn_motion.focus_neighbor_bottom = btn_settings_back.get_path()
+	if btn_show_kana != null:
+		btn_show_kana.focus_neighbor_top = btn_vibration.get_path()
+		btn_show_kana.focus_neighbor_left = btn_motion.get_path()
+		btn_show_kana.focus_neighbor_right = btn_assist_power.get_path()
+		btn_show_kana.focus_neighbor_bottom = btn_settings_back.get_path()
+	if btn_assist_power != null:
+		btn_assist_power.focus_neighbor_top = btn_hit_pitch.get_path()
+		btn_assist_power.focus_neighbor_left = btn_show_kana.get_path()
+		btn_assist_power.focus_neighbor_bottom = btn_settings_back.get_path()
 
 	if btn_settings_back != null:
-		btn_settings_back.focus_neighbor_top = btn_lang.get_path()
+		btn_settings_back.focus_neighbor_top = btn_motion.get_path() if btn_motion != null else btn_lang.get_path()
 
 func rumble(weak := 0.4, strong := 0.4, duration := 0.2) -> void:
 	if not vibration_enabled:
@@ -2435,6 +2218,7 @@ func _update_input_prompts() -> void:
 	for b in [lbl_badge_accel, lbl_badge_brake, lbl_badge_lock, lbl_badge_voice]:
 		if b != null and is_instance_valid(b):
 			b.text = b.get_meta("pad_text", "") if current_input_device == "joypad" else b.get_meta("kb_text", "")
+			b.visible = current_input_device != "touch"
 	_update_pad_bar()
 	_update_title_prompts()
 	if state == State.READY:
@@ -2489,7 +2273,7 @@ func _update_pad_bar() -> void:
 		pad_bar.visible = false
 
 func _build_shop() -> void:
-	var sp := _panel_center("panel_9slice")
+	var sp := _panel_center()
 	shop_box = sp[0]
 	var shop_root: VBoxContainer = sp[1]
 	shop_root.add_theme_constant_override("separation", 14)
@@ -2519,7 +2303,7 @@ func _build_shop() -> void:
 	shop_scroll.add_child(shop_list)
 
 	btn_shop_back = _button(I18n.t("BTN_ENDLESS_BACK", "返回選關"))
-	_art_button(btn_shop_back, "btn_secondary", 32)
+	_style_button(btn_shop_back, "btn_secondary")
 	btn_shop_back.custom_minimum_size = Vector2(480, 60) * UI
 	btn_shop_back.add_theme_font_size_override("font_size", int(26 * UI))
 	btn_shop_back.pressed.connect(hide_shop)
@@ -2570,20 +2354,12 @@ func _apply_upgrades_from_save() -> void:
 	var aura_data: Dictionary = AURAS.get(aura_id, AURAS["default"])
 	if runner != null:
 		runner.set_aura(aura_data.color, float(aura_data.strength), aura_data.get("rim_color", Color.WHITE), float(aura_data.get("rim_strength", 0.0)))
-	if runner_trail != null:
-		var mat := runner_trail.material_override as StandardMaterial3D
-		if mat != null:
-			mat.albedo_color = aura_data.trail_color
-	# Tactical upgrades
-	var hp_lvl: int = save.get_upgrade_level("hp_level")
-	if hp_lvl > 0:
-		set_max_hp_bonus(hp_lvl * 20, false)
-	var armor_lvl: int = save.get_upgrade_level("armor_level")
-	if armor_lvl > 0:
-		set_damage_reduction(armor_lvl * 15.0)
-	var shield_lvl: int = save.get_upgrade_level("shield_level")
-	if shield_lvl > 0:
-		shield = maxi(shield, shield_lvl)
+	if _power_assist():
+		set_max_hp_bonus(save.get_upgrade_level("hp_level") * 20, false)
+		set_damage_reduction(float(save.get_upgrade_level("armor_level")) * 15.0)
+		var shield_lvl: int = save.get_upgrade_level("shield_level")
+		if shield_lvl > 0:
+			shield = maxi(shield, shield_lvl)
 
 func _refresh_shop_ui() -> void:
 	if not is_instance_valid(shop_list):
@@ -2617,7 +2393,7 @@ func _refresh_shop_ui() -> void:
 		card_sb.border_width_top = 3
 		card_sb.border_width_bottom = 3
 		card_sb.border_color = a.color if equipped_aura == aura_key else Color(0.25, 0.22, 0.40, 0.8)
-		card_sb.set_corner_radius_all(8)
+
 		card_sb.set_content_margin_all(8)
 		item_card.add_theme_stylebox_override("panel", card_sb)
 		item_card.custom_minimum_size.x = content_w
@@ -2657,10 +2433,10 @@ func _refresh_shop_ui() -> void:
 		if is_equipped:
 			btn.text = I18n.t("SHOP_EQUIPPED", "已裝備")
 			btn.disabled = true
-			_art_button(btn, "btn_small", 32)
+			_style_button(btn, "btn_small")
 		elif is_unlocked:
 			btn.text = I18n.t("SHOP_EQUIP", "裝備")
-			_art_button(btn, "btn_primary", 32)
+			_style_button(btn, "btn_primary")
 			btn.pressed.connect(func():
 				save.equip_aura(aura_id)
 				save.save_file()
@@ -2669,9 +2445,9 @@ func _refresh_shop_ui() -> void:
 			)
 		else:
 			var cost: int = int(a.cost)
-			btn.text = "%d 點" % cost
+			btn.text = I18n.t("SHOP_COST", "%d 點") % cost
 			btn.disabled = save.points() < cost
-			_art_button(btn, "btn_secondary" if btn.disabled else "btn_primary", 32)
+			_style_button(btn, "btn_secondary" if btn.disabled else "btn_primary")
 			btn.pressed.connect(func():
 				if save.unlock_aura(aura_id, cost):
 					save.equip_aura(aura_id)
@@ -2683,7 +2459,7 @@ func _refresh_shop_ui() -> void:
 
 	# Section 2: Tactical Upgrades
 	var h2 := Label.new()
-	h2.text = I18n.t("SHOP_SECTION_UPGRADE", "【 戰術裝備升級 】")
+	h2.text = I18n.t("SHOP_SECTION_ASSIST", "輔助裝備（開啟後不計星）")
 	h2.add_theme_font_override("font", Assets.FONT_HUD)
 	h2.add_theme_font_size_override("font_size", int(22 * UI))
 	h2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -2704,7 +2480,7 @@ func _refresh_shop_ui() -> void:
 		card_sb.border_width_top = 3
 		card_sb.border_width_bottom = 3
 		card_sb.border_color = Color(0.35, 0.70, 0.95, 0.85) if cur_lvl > 0 else Color(0.25, 0.22, 0.40, 0.8)
-		card_sb.set_corner_radius_all(8)
+
 		card_sb.set_content_margin_all(8)
 		item_card.add_theme_stylebox_override("panel", card_sb)
 		item_card.custom_minimum_size.x = content_w
@@ -2720,14 +2496,14 @@ func _refresh_shop_ui() -> void:
 		row.add_child(info)
 
 		var l_name := Label.new()
-		l_name.text = "%s (Lv.%d/%d)" % [u.name, cur_lvl, max_lvl]
+		l_name.text = "%s (Lv.%d/%d)" % [I18n.t(str(u.get("name_key", "")), str(u.name)), cur_lvl, max_lvl]
 		l_name.add_theme_font_override("font", Assets.FONT_HUD)
 		l_name.add_theme_font_size_override("font_size", int(20 * UI))
 		_ink(l_name)
 		info.add_child(l_name)
 
 		var l_desc := Label.new()
-		l_desc.text = u.desc
+		l_desc.text = I18n.t(str(u.get("desc_key", "")), str(u.desc))
 		l_desc.add_theme_font_override("font", Assets.FONT_HUD)
 		l_desc.add_theme_font_size_override("font_size", int(15 * UI))
 		l_desc.add_theme_color_override("font_color", Color(0.75, 0.78, 0.88))
@@ -2739,14 +2515,14 @@ func _refresh_shop_ui() -> void:
 		row.add_child(btn)
 
 		if cur_lvl >= max_lvl:
-			btn.text = "已滿級"
+			btn.text = I18n.t("SHOP_MAXED", "已滿級")
 			btn.disabled = true
-			_art_button(btn, "btn_small", 32)
+			_style_button(btn, "btn_small")
 		else:
 			var cost: int = int(u.costs[cur_lvl])
-			btn.text = "%d 點" % cost
+			btn.text = I18n.t("SHOP_COST", "%d 點") % cost
 			btn.disabled = save.points() < cost
-			_art_button(btn, "btn_secondary" if btn.disabled else "btn_primary", 32)
+			_style_button(btn, "btn_secondary" if btn.disabled else "btn_primary")
 			btn.pressed.connect(func():
 				if save.buy_upgrade(upg_id, max_lvl, cost):
 					save.save_file()
@@ -2756,7 +2532,7 @@ func _refresh_shop_ui() -> void:
 			)
 
 func _build_achievements() -> void:
-	var ap := _panel_center("panel_9slice")
+	var ap := _panel_center()
 	achievements_box = ap[0]
 	var ach_root: VBoxContainer = ap[1]
 	ach_root.add_theme_constant_override("separation", 14)
@@ -2786,7 +2562,7 @@ func _build_achievements() -> void:
 	achievements_scroll.add_child(achievements_list)
 
 	btn_achievements_back = _button(I18n.t("BTN_ENDLESS_BACK", "返回選關"))
-	_art_button(btn_achievements_back, "btn_secondary", 32)
+	_style_button(btn_achievements_back, "btn_secondary")
 	btn_achievements_back.custom_minimum_size = Vector2(480, 60) * UI
 	btn_achievements_back.add_theme_font_size_override("font_size", int(26 * UI))
 	btn_achievements_back.pressed.connect(hide_achievements)
@@ -2847,7 +2623,7 @@ func _refresh_achievements_ui() -> void:
 	var unclaimed: int = save.unclaimed_achievement_count() if save != null else 0
 	if unclaimed > 0:
 		btn_claim_all = _button("一鍵領取全部獎勵 (%d 項)" % unclaimed)
-		_art_button(btn_claim_all, "btn_primary", 32)
+		_style_button(btn_claim_all, "btn_primary")
 		btn_claim_all.custom_minimum_size = Vector2(content_w, 48 * UI)
 		btn_claim_all.add_theme_font_size_override("font_size", int(18 * UI))
 		btn_claim_all.pressed.connect(func():
@@ -2876,7 +2652,7 @@ func _refresh_achievements_ui() -> void:
 		card_sb.border_width_top = 3
 		card_sb.border_width_bottom = 3
 		card_sb.border_color = Color(1.0, 0.85, 0.25, 0.9) if is_unlocked else Color(0.25, 0.22, 0.38, 0.6)
-		card_sb.set_corner_radius_all(8)
+
 		card_sb.set_content_margin_all(10)
 		item_card.add_theme_stylebox_override("panel", card_sb)
 		item_card.custom_minimum_size.x = content_w
@@ -2887,13 +2663,10 @@ func _refresh_achievements_ui() -> void:
 		row.add_theme_constant_override("separation", 12)
 		item_card.add_child(row)
 
-		var badge_icon := TextureRect.new()
-		badge_icon.texture = Art.UI.star_full_40 if is_unlocked else Art.UI.star_empty_40
+		var badge_icon := _result_label("★" if is_unlocked else "☆", 36)
 		badge_icon.custom_minimum_size = Vector2(36, 36) * UI
-		badge_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		badge_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		badge_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		badge_icon.modulate = Color(1.0, 0.9, 0.3) if is_unlocked else Color(0.5, 0.5, 0.6, 0.6)
+		badge_icon.add_theme_color_override("font_color", AMBER if is_unlocked else MUTED)
 		row.add_child(badge_icon)
 
 		var info := VBoxContainer.new()
@@ -2952,7 +2725,7 @@ func _refresh_achievements_ui() -> void:
 			status_box.add_child(l_rew)
 		else:
 			var btn_claim := _button("領取 +%d 點" % int(a.reward))
-			_art_button(btn_claim, "btn_primary", 32)
+			_style_button(btn_claim, "btn_primary")
 			btn_claim.custom_minimum_size = Vector2(130, 44) * UI
 			btn_claim.add_theme_font_size_override("font_size", int(16 * UI))
 			btn_claim.pressed.connect(func():
@@ -2973,7 +2746,7 @@ func _build_achievement_toast() -> void:
 	sb.border_width_top = 3
 	sb.border_width_bottom = 3
 	sb.border_color = Color(1.0, 0.85, 0.25, 0.95)
-	sb.set_corner_radius_all(10)
+
 	sb.set_content_margin_all(12)
 	achievement_toast.add_theme_stylebox_override("panel", sb)
 
@@ -2982,14 +2755,6 @@ func _build_achievement_toast() -> void:
 	hbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hbox.add_theme_constant_override("separation", 14)
 	achievement_toast.add_child(hbox)
-
-	var icon := TextureRect.new()
-	icon.texture = Art.UI.badge_new_record
-	icon.custom_minimum_size = Vector2(44, 44) * UI
-	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	hbox.add_child(icon)
 
 	var vbox := VBoxContainer.new()
 	vbox.name = "VBox"
@@ -3016,7 +2781,7 @@ func _build_achievement_toast() -> void:
 	toast_lbl_desc.name = "LblDesc"
 	toast_lbl_desc.add_theme_font_override("font", Assets.FONT_HUD)
 	toast_lbl_desc.add_theme_font_size_override("font_size", int(15 * UI))
-	toast_lbl_desc.add_theme_color_override("font_color", Color(0.4, 0.88, 1.0))
+	toast_lbl_desc.add_theme_color_override("font_color", MUTED)
 	vbox.add_child(toast_lbl_desc)
 
 	achievement_toast.visible = false
@@ -3055,25 +2820,17 @@ func fade_transition(on_midpoint: Callable, fade_out := 0.22, fade_in := 0.22) -
 	)
 
 func _build_title() -> void:
-	var tp := _panel_center("panel_9slice")
+	var tp := _panel_center()
 	title_box = tp[0]
 	var title_root: VBoxContainer = tp[1]
 	title_root.add_theme_constant_override("separation", 14)
-
-	title_logo_rect = TextureRect.new()
-	title_logo_rect.texture = Art.ICON
-	title_logo_rect.custom_minimum_size = Vector2(110, 110) * UI
-	title_logo_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	title_logo_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	title_logo_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	title_root.add_child(title_logo_rect)
 
 	lbl_title_name = Label.new()
 	lbl_title_name.text = I18n.t("GAME_TITLE", "假名跑酷 2.0")
 	lbl_title_name.add_theme_font_override("font", Assets.FONT_HUD)
 	lbl_title_name.add_theme_font_size_override("font_size", int(48 * UI))
 	lbl_title_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl_title_name.add_theme_color_override("font_color", Color(1.0, 0.92, 0.35))
+	lbl_title_name.add_theme_color_override("font_color", AMBER)
 	lbl_title_name.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.75))
 	lbl_title_name.add_theme_constant_override("shadow_offset_x", 3)
 	lbl_title_name.add_theme_constant_override("shadow_offset_y", 3)
@@ -3102,12 +2859,12 @@ func _build_title() -> void:
 
 	btn_title_start = _button(I18n.t("BTN_START_GAME", "開始遊戲"))
 	btn_title_start.custom_minimum_size = Vector2(360, 68) * UI
-	_art_button(btn_title_start, "btn_primary", 32)
+	_style_button(btn_title_start, "btn_primary")
 	btn_vbox.add_child(btn_title_start)
 
 	btn_title_chart = _button(I18n.t("BTN_CHART", "五十音・特訓"))
 	btn_title_chart.custom_minimum_size = Vector2(360, 56) * UI
-	_art_button(btn_title_chart, "btn_secondary", 32)
+	_style_button(btn_title_chart, "btn_secondary")
 	btn_vbox.add_child(btn_title_chart)
 
 	var sub_hbox := HBoxContainer.new()
@@ -3117,12 +2874,12 @@ func _build_title() -> void:
 
 	btn_title_settings = _button(I18n.t("BTN_TITLE_SETTINGS", "設定"))
 	btn_title_settings.custom_minimum_size = Vector2(175, 56) * UI
-	_art_button(btn_title_settings, "btn_secondary", 32)
+	_style_button(btn_title_settings, "btn_secondary")
 	sub_hbox.add_child(btn_title_settings)
 
 	btn_title_quit = _button(I18n.t("BTN_TITLE_QUIT", "離開遊戲"))
 	btn_title_quit.custom_minimum_size = Vector2(175, 56) * UI
-	_art_button(btn_title_quit, "btn_secondary", 32)
+	_style_button(btn_title_quit, "btn_secondary")
 	sub_hbox.add_child(btn_title_quit)
 
 	btn_title_start.pressed.connect(start_from_title)
@@ -3214,21 +2971,31 @@ func _queue_achievement_toast(id: String, title: String, desc: String, reward: i
 	if toast_tween == null or not toast_tween.is_valid() or not toast_tween.is_running():
 		_show_next_achievement_toast()
 
+func _toast_allowed() -> bool:
+	return state == State.CLEARED or state == State.FAILED
+
+func _flush_toasts() -> void:
+	if toast_tween != null and toast_tween.is_valid() and toast_tween.is_running():
+		return
+	_show_next_achievement_toast()
+
 func _show_next_achievement_toast() -> void:
+	if not _toast_allowed():
+		return
 	if toast_queue.is_empty() or achievement_toast == null or not is_inside_tree():
 		return
 	var item: Dictionary = toast_queue.pop_front()
 	if toast_lbl_name: toast_lbl_name.text = "【%s】" % str(item.title)
-	if toast_lbl_desc: toast_lbl_desc.text = "%s · 獎勵 +%d 點" % [str(item.desc), int(item.reward)]
+	if toast_lbl_desc: toast_lbl_desc.text = I18n.t("TOAST_REWARD", "%s · 獎勵 +%d 點") % [str(item.desc), int(item.reward)]
 
 	var view := get_viewport().get_visible_rect().size
 	var insets: Dictionary = get_safe_insets()
 	var toast_w := minf(500.0 * UI, view.x - 40.0 * UI)
 	achievement_toast.custom_minimum_size = Vector2(toast_w, 0)
 	achievement_toast.reset_size()
-	var toast_x := (view.x - achievement_toast.size.x) * 0.5
+	var toast_x := (view.x - toast_w) * 0.5
 	var start_y := -achievement_toast.size.y - 20.0
-	var target_y := float(insets.top) + 20.0 * UI
+	var target_y := float(insets.top) + 18.0
 
 	achievement_toast.position = Vector2(toast_x, start_y)
 	achievement_toast.visible = true
@@ -3262,7 +3029,7 @@ func check_achievement(id: String) -> void:
 		_queue_achievement_toast(id, str(ach_data.get("title", "")), str(ach_data.get("desc", "")), reward)
 
 func _build_endless() -> void:
-	var ep := _panel_center("panel_9slice")
+	var ep := _panel_center()
 	endless_box = ep[0]
 	var endless_root: VBoxContainer = ep[1]
 	endless_root.add_theme_constant_override("separation", 14)
@@ -3279,7 +3046,7 @@ func _build_endless() -> void:
 	subtitle.text = I18n.t("ENDLESS_PANEL_SUB", "全五十音隨機循環 · 波次難度漸增 · 挑戰生存極限")
 	subtitle.add_theme_font_override("font", Assets.FONT_HUD)
 	subtitle.add_theme_font_size_override("font_size", int(18 * UI))
-	subtitle.add_theme_color_override("font_color", Color(0.3, 0.9, 1.0))
+	subtitle.add_theme_color_override("font_color", AMBER)
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_ink(subtitle)
 	endless_root.add_child(subtitle)
@@ -3299,14 +3066,14 @@ func _build_endless() -> void:
 	endless_root.add_child(btn_row)
 
 	btn_endless_start = _button(I18n.t("BTN_ENDLESS_START", "出發挑戰！"))
-	_art_button(btn_endless_start, "btn_primary", 32)
+	_style_button(btn_endless_start, "btn_primary")
 	btn_endless_start.custom_minimum_size = Vector2(230, 56) * UI
 	btn_endless_start.add_theme_font_size_override("font_size", int(24 * UI))
 	btn_endless_start.pressed.connect(start_endless)
 	btn_row.add_child(btn_endless_start)
 
 	btn_endless_back = _button(I18n.t("BTN_ENDLESS_BACK", "返回選關"))
-	_art_button(btn_endless_back, "btn_secondary", 32)
+	_style_button(btn_endless_back, "btn_secondary")
 	btn_endless_back.custom_minimum_size = Vector2(230, 56) * UI
 	btn_endless_back.add_theme_font_size_override("font_size", int(24 * UI))
 	btn_endless_back.pressed.connect(hide_endless)
@@ -3374,8 +3141,8 @@ func _refresh_endless_ui() -> void:
 	stats_sb.border_width_right = 3
 	stats_sb.border_width_top = 3
 	stats_sb.border_width_bottom = 3
-	stats_sb.border_color = Color(0.2, 0.9, 1.0, 0.85)
-	stats_sb.set_corner_radius_all(10)
+	stats_sb.border_color = Color(AMBER, 0.85)
+
 	stats_sb.set_content_margin_all(14)
 	stats_card.add_theme_stylebox_override("panel", stats_sb)
 	stats_card.custom_minimum_size.x = content_w
@@ -3415,7 +3182,7 @@ func _refresh_endless_ui() -> void:
 	rules_sb.border_width_top = 2
 	rules_sb.border_width_bottom = 2
 	rules_sb.border_color = Color(0.4, 0.35, 0.6, 0.6)
-	rules_sb.set_corner_radius_all(10)
+
 	rules_sb.set_content_margin_all(12)
 	rules_card.add_theme_stylebox_override("panel", rules_sb)
 	rules_card.custom_minimum_size.x = content_w
@@ -3459,7 +3226,7 @@ func _refresh_endless_ui() -> void:
 			h_sb.border_width_top = 1
 			h_sb.border_width_bottom = 1
 			h_sb.border_color = Color(0.3, 0.35, 0.5, 0.4)
-			h_sb.set_corner_radius_all(6)
+
 			h_sb.set_content_margin_all(8)
 			h_row.add_theme_stylebox_override("panel", h_sb)
 			h_row.custom_minimum_size.x = content_w
@@ -3563,7 +3330,7 @@ func _finish_endless(reason := "") -> void:
 		grade_col = Color(1.0, 0.85, 0.2)
 	elif endless_score >= 6000:
 		grade = "A"
-		grade_col = Color(0.1, 0.95, 1.0)
+		grade_col = AMBER
 	elif endless_score >= 3000:
 		grade = "B"
 		grade_col = Color(1.0, 0.45, 0.85)
@@ -3607,7 +3374,7 @@ func _finish_endless(reason := "") -> void:
 	res_weak_box.visible = false
 	res_knowledge_box.visible = false
 	for i in 3:
-		var st_child := res_stars.get_child(i) as TextureRect
+		var st_child := res_stars.get_child(i) as Label
 		st_child.visible = false
 
 	lbl_center.text = ""
@@ -3639,7 +3406,7 @@ func play_kana_voice(romaji: String) -> void:
 		sfx("focus")
 
 func _build_chart() -> void:
-	var cp := _panel_center("panel_9slice")
+	var cp := _panel_center()
 	chart_box = cp[0]
 	var chart_root: VBoxContainer = cp[1]
 	chart_root.add_theme_constant_override("separation", 10)
@@ -3656,7 +3423,7 @@ func _build_chart() -> void:
 	subtitle.text = I18n.t("CHART_SUBTITLE", "點擊假名聆聽原生發音 · 自由組合弱點行段疾走特訓")
 	subtitle.add_theme_font_override("font", Assets.FONT_HUD)
 	subtitle.add_theme_font_size_override("font_size", int(16 * UI))
-	subtitle.add_theme_color_override("font_color", Color(0.3, 0.9, 1.0))
+	subtitle.add_theme_color_override("font_color", AMBER)
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_ink(subtitle)
 	chart_root.add_child(subtitle)
@@ -3678,7 +3445,7 @@ func _build_chart() -> void:
 		var tb := _button(td[1])
 		tb.custom_minimum_size = Vector2(90, 44) * UI
 		tb.add_theme_font_size_override("font_size", int(15 * UI))
-		_art_button(tb, "tab_active" if chart_tab == td[0] else "tab_inactive", 16)
+		_style_button(tb, "tab_active" if chart_tab == td[0] else "tab_inactive")
 		tb.pressed.connect(func():
 			chart_tab = td[0]
 			_refresh_chart_ui()
@@ -3696,7 +3463,7 @@ func _build_chart() -> void:
 	chart_scroll.add_child(chart_content)
 
 	btn_chart_back = _button(I18n.t("BTN_SETTINGS_BACK", "返回"))
-	_art_button(btn_chart_back, "btn_secondary", 32)
+	_style_button(btn_chart_back, "btn_secondary")
 	btn_chart_back.custom_minimum_size = Vector2(440, 52) * UI
 	btn_chart_back.add_theme_font_size_override("font_size", int(22 * UI))
 	btn_chart_back.pressed.connect(hide_chart)
@@ -3759,7 +3526,7 @@ func _refresh_chart_ui() -> void:
 		var btn: Button = chart_tab_buttons[t_id]
 		if is_instance_valid(btn):
 			var active: bool = (chart_tab == t_id)
-			_art_button(btn, "tab_active" if active else "tab_inactive", 16)
+			_style_button(btn, "tab_active" if active else "tab_inactive")
 			btn.button_pressed = active
 
 	if chart_tab in ["hira", "kata", "dakuon", "youon"]:
@@ -3797,7 +3564,7 @@ func _render_chart_table(tab: String) -> void:
 		c_lbl.text = c_name
 		c_lbl.add_theme_font_override("font", Assets.FONT_HUD)
 		c_lbl.add_theme_font_size_override("font_size", int(16 * UI))
-		c_lbl.add_theme_color_override("font_color", Color(0.3, 0.9, 1.0))
+		c_lbl.add_theme_color_override("font_color", AMBER)
 		c_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		c_lbl.custom_minimum_size = Vector2((58.0 if tab != "youon" else 85.0) * UI, 24 * UI)
 		head_hbox.add_child(c_lbl)
@@ -3833,13 +3600,21 @@ func _render_chart_table(tab: String) -> void:
 				var cell_btn := _button("%s\n%s" % [k, r])
 				cell_btn.add_theme_font_size_override("font_size", int(16 * UI))
 				cell_btn.custom_minimum_size = Vector2(cell_w, 50 * UI)
-				_art_button(cell_btn, "btn_secondary", 16)
+				_style_button(cell_btn, "btn_secondary")
 				var tier: String = save.get_kana_tier(k)
 				var tier_col: Color = Color(0.9, 0.95, 1.0)
 				match tier:
 					"mastered": tier_col = Color(0.25, 0.98, 0.45)
 					"learning": tier_col = Color(1.0, 0.88, 0.30)
 					"weak": tier_col = Color(1.0, 0.38, 0.38)
+				var mark := ""
+				if tier == "mastered":
+					mark = "■ "
+				elif tier == "learning":
+					mark = "□ "
+				elif tier == "weak":
+					mark = "× "
+				cell_btn.text = "%s%s\n%s" % [mark, k, r]
 				cell_btn.add_theme_color_override("font_color", tier_col)
 				cell_btn.add_theme_color_override("font_hover_color", tier_col.lightened(0.2))
 				cell_btn.pressed.connect(play_kana_voice.bind(r))
@@ -3874,7 +3649,7 @@ func _render_drill_panel() -> void:
 		var q_btn := _button(qc[1])
 		q_btn.custom_minimum_size = Vector2(88, 40) * UI
 		q_btn.add_theme_font_size_override("font_size", int(14 * UI))
-		_art_button(q_btn, "btn_secondary", 16)
+		_style_button(q_btn, "btn_secondary")
 		q_btn.pressed.connect(_quick_select_drill.bind(qc[0]))
 		q_row.add_child(q_btn)
 
@@ -3907,7 +3682,7 @@ func _render_drill_panel() -> void:
 		var c_btn := _button(co[1])
 		c_btn.custom_minimum_size = Vector2(82, 42) * UI
 		c_btn.add_theme_font_size_override("font_size", int(14 * UI))
-		_art_button(c_btn, "tab_active" if drill_count_mode == co[0] else "btn_secondary", 16)
+		_style_button(c_btn, "tab_active" if drill_count_mode == co[0] else "btn_secondary")
 		c_btn.pressed.connect(func():
 			drill_count_mode = co[0]
 			_refresh_chart_ui()
@@ -3922,7 +3697,7 @@ func _render_drill_panel() -> void:
 		var m_btn := _button(mo[1])
 		m_btn.custom_minimum_size = Vector2(76, 42) * UI
 		m_btn.add_theme_font_size_override("font_size", int(14 * UI))
-		_art_button(m_btn, "tab_active" if drill_speed_mode == mo[0] else "btn_secondary", 16)
+		_style_button(m_btn, "tab_active" if drill_speed_mode == mo[0] else "btn_secondary")
 		m_btn.pressed.connect(func():
 			drill_speed_mode = mo[0]
 			_refresh_chart_ui()
@@ -3931,7 +3706,7 @@ func _render_drill_panel() -> void:
 
 	# Start Button
 	btn_drill_start = _button(I18n.t("DRILL_BTN_START", "★ 開始自訂特訓！"))
-	_art_button(btn_drill_start, "btn_primary", 32)
+	_style_button(btn_drill_start, "btn_primary")
 	btn_drill_start.custom_minimum_size = Vector2(400, 54) * UI
 	btn_drill_start.add_theme_font_size_override("font_size", int(22 * UI))
 	btn_drill_start.pressed.connect(start_custom_drill)
@@ -3953,7 +3728,7 @@ func _render_drill_panel() -> void:
 	hira_head.text = "【平假名行段】"
 	hira_head.add_theme_font_override("font", Assets.FONT_HUD)
 	hira_head.add_theme_font_size_override("font_size", int(17 * UI))
-	hira_head.add_theme_color_override("font_color", Color(0.3, 0.9, 1.0))
+	hira_head.add_theme_color_override("font_color", AMBER)
 	chart_content.add_child(hira_head)
 
 	for r_entry in CHART_HIRA_SEION + CHART_DAKUON.slice(0, 5) + CHART_YOUON.slice(0, 11):
@@ -3966,7 +3741,7 @@ func _render_drill_panel() -> void:
 	kata_head.text = "【片假名行段】"
 	kata_head.add_theme_font_override("font", Assets.FONT_HUD)
 	kata_head.add_theme_font_size_override("font_size", int(17 * UI))
-	kata_head.add_theme_color_override("font_color", Color(0.3, 0.9, 1.0))
+	kata_head.add_theme_color_override("font_color", AMBER)
 	chart_content.add_child(kata_head)
 
 	for r_entry in CHART_KATA_SEION + CHART_DAKUON.slice(5) + CHART_YOUON.slice(11):
@@ -3983,12 +3758,12 @@ func _add_drill_row_button(r_name: String, pairs: Array) -> void:
 	row_btn.custom_minimum_size = Vector2(400, 44) * UI
 	row_btn.add_theme_font_size_override("font_size", int(16 * UI))
 	row_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_art_button(row_btn, "tab_active" if is_chk else "btn_secondary", 16)
+	_style_button(row_btn, "tab_active" if is_chk else "btn_secondary")
 	row_btn.pressed.connect(func():
 		drill_selected_rows[r_name] = not drill_selected_rows.get(r_name, false)
 		var now_chk: bool = drill_selected_rows[r_name]
 		row_btn.text = "%s  %s: %s" % ["[✓]" if now_chk else "[  ]", r_name, sample.strip_edges()]
-		_art_button(row_btn, "tab_active" if now_chk else "btn_secondary", 16)
+		_style_button(row_btn, "tab_active" if now_chk else "btn_secondary")
 		_update_drill_counter()
 		if lbl_drill_warn != null: lbl_drill_warn.visible = false
 	)
@@ -4161,94 +3936,127 @@ func start_daily_run() -> void:
 	, 0.2, 0.2)
 
 
+func _meta_unlocked() -> bool:
+	return save != null and save.cleared_any("1-BOSS")
+
+func _show_kana_assist() -> bool:
+	return save != null and bool(save.get_setting("show_kana", false))
+
+func _power_assist() -> bool:
+	return save != null and bool(save.get_setting("assist_power", false))
+
+func _assist_run() -> bool:
+	return _show_kana_assist() or _power_assist()
+
+func _reduced_motion() -> bool:
+	return save != null and bool(save.get_setting("reduced_motion", false))
+
 func _layout_select_scroll() -> void:
 	var view := get_viewport().get_visible_rect().size
 	var short_side := minf(view.x, view.y)
 	var insets: Dictionary = get_safe_insets()
-	var footer_height := maxf(90.0, short_side * 0.113)
-	if is_instance_valid(select_scroll):
-		select_scroll.custom_minimum_size.y = maxf(140.0, view.y - 620.0 * UI - (footer_height - 90.0) - float(insets.top) - float(insets.bottom))
-	if not is_instance_valid(btn_tutorial) or not btn_tutorial.is_inside_tree():
+	var footer_height := maxf(72.0, short_side * 0.113)
+	if is_instance_valid(btn_tutorial) and btn_tutorial.is_inside_tree():
+		var font_size := roundi(short_side * 0.034)
+		var compact := font_size * 9.0 + 64.0 > btn_tutorial.custom_minimum_size.x
+		btn_tutorial.text = I18n.t("BTN_TUTORIAL_COMPACT", "新手練習\n3 題") if compact else I18n.t("BTN_TUTORIAL", "新手練習 · 3 題")
+		btn_settings.text = (I18n.t("SETTINGS_BTN_COMPACT", "設定\n%s模式") if compact else I18n.t("SETTINGS_BTN", "設定（%s模式）")) % mode_name()
+		if is_instance_valid(btn_to_title):
+			btn_to_title.text = I18n.t("BTN_TO_TITLE", "回主畫面")
+		for button in [btn_tutorial, btn_settings, btn_to_title]:
+			if button != null and is_instance_valid(button):
+				button.custom_minimum_size.y = footer_height
+				button.add_theme_font_size_override("font_size", font_size)
+	if not is_instance_valid(select_scroll) or not is_instance_valid(select_columns):
 		return
-	var font_size := roundi(short_side * 0.034)
-	var compact := font_size * 9.0 + 64.0 > btn_tutorial.custom_minimum_size.x
-	btn_tutorial.text = I18n.t("BTN_TUTORIAL_COMPACT", "新手練習\n3 題") if compact else I18n.t("BTN_TUTORIAL", "新手練習 · 3 題")
-	btn_settings.text = (I18n.t("SETTINGS_BTN_COMPACT", "設定\n%s模式") if compact else I18n.t("SETTINGS_BTN", "設定（%s模式）")) % mode_name()
-	if is_instance_valid(btn_to_title):
-		btn_to_title.text = I18n.t("BTN_TO_TITLE", "回主畫面")
-	for button in [btn_tutorial, btn_settings, btn_to_title]:
-		if button != null and is_instance_valid(button):
-			button.custom_minimum_size.y = footer_height
-			button.add_theme_font_size_override("font_size", font_size)
+	var wide := view.x >= view.y * 1.25
+	select_columns.vertical = not wide
+	var outer: PanelContainer = select_box.get_child(0)
+	var toolbar_sheet: PanelContainer = select_toolbar.get_parent()
+	var index_sheet: PanelContainer = select_scroll.get_parent()
+	outer.add_theme_stylebox_override("panel", StyleBoxEmpty.new() if wide else _paper_style(30.0))
+	for sheet in [toolbar_sheet, index_sheet]:
+		sheet.add_theme_stylebox_override("panel", _paper_style(24.0) if wide else StyleBoxEmpty.new())
+	if is_instance_valid(select_footer):
+		var parent := select_toolbar if wide else select_list
+		if select_footer.get_parent() != parent:
+			var focus := get_viewport().gui_get_focus_owner()
+			select_footer.reparent(parent, false)
+			if focus != null and select_footer.is_ancestor_of(focus):
+				focus.grab_focus.call_deferred()
+		select_footer.vertical = wide
+		for button in select_footer.get_children():
+			button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var usable_h := view.y - float(insets.top) - float(insets.bottom) - 104.0
+	var toolbar_h := select_toolbar.get_combined_minimum_size().y + 12.0 if not wide else 0.0
+	var foot_h := 0.0 if wide else footer_height
+	select_scroll.custom_minimum_size.y = maxf(120.0, usable_h - toolbar_h - foot_h)
+	select_scroll.clip_contents = true
 
-## Touch buttons scale with the short side of the (stretched) canvas so they stay
-## comfortably large in portrait and landscape.
 func _layout_touch() -> void:
-	# The new layout defines a new base position, independent of an active shake.
 	_set_hp_shake(0.0)
-	var vs: Vector2 = get_viewport().get_visible_rect().size
-	var ins: Dictionary = get_safe_insets()
-	var inl: float = float(ins.left)
-	var inr: float = float(ins.right)
-	var intop: float = float(ins.top)
-	var inb: float = float(ins.bottom)
+	var view := get_viewport().get_visible_rect().size
+	var inset := get_safe_insets()
+	var wide := view.x >= view.y * 1.25
+	var u := minf(view.x, view.y) / 1080.0
+	var left: float = inset.left + 42.0 * u
+	var right: float = view.x - inset.right - 42.0 * u
+	var top: float = inset.top + 39.0 * u
+	var bottom: float = view.y - inset.bottom - 56.0 * u
+	var middle := view.x * 0.5
+	var stat_w := 320.0 * u
+	var stat_h := 52.0 * u
+	var control_w := (244.0 if wide else 265.0) * u
+	var control_h := 122.0 * u
+	var top_w := 182.0 * u
+	var top_h := 122.0 * u
+	var voice_y := top + top_h + 13.0 * u
+	var cue_y := maxf(top + 155.0 * u, view.y * (0.21 if wide else 0.23))
+	var cue_w := 300.0 * u
 
-	var m := minf(vs.x, vs.y)
-	var a := m * 0.28      # accel  (art 320x250 incl. shadow)
-	var b := m * 0.24      # brake
-	var t := m * 0.13      # pause / voice
-	var g := m * 0.035     # margin
-	var ah := a * 250.0 / 320.0
-	var bh := b * 250.0 / 320.0
-	# Run status follows the sides. Only the question cue occupies the upper centre.
-	_place_px(timer_panel, 0, 0, 0, 0, g + inl, g + intop, g + inl + m * 0.365, intop + m * 0.118)
-	_place_px(lbl_count, 0, 0, 0, 0, g + inl + m * 0.01, intop + m * 0.12, g + inl + m * 0.365, intop + m * 0.206)
-	_place_px(hearts_box, 0, 0, 0, 0, g + inl, intop + m * 0.207, g + inl + m * 0.365, intop + m * 0.294)
-	_place_px(shield_box, 0, 0, 0, 0, g + inl, intop + m * 0.305, g + inl + m * 0.365, intop + m * 0.388)
-	_place_px(combo_badge, 1, 0, 1, 0, -g - inr - m * 0.24, intop + m * 0.332, -g - inr, intop + m * 0.410)
-	_place_px(lbl_hint, 0.5, 0, 0.5, 0, -m * 0.11, intop + m * 0.074, m * 0.11, intop + m * 0.204)
-	_place_px(lbl_notice, 0.5, 0, 0.5, 0, -m * 0.16, intop + m * 0.225, m * 0.16, intop + m * 0.299)
-	_place_px(lbl_float, 0.5, 0, 0.5, 0, m * 0.115, intop + m * 0.163, m * 0.315, intop + m * 0.222)
-	_place_px(go_box, 0.5, 0, 0.5, 0, m * 0.127, intop + m * 0.050, m * 0.227, intop + m * 0.150)
-	_place_px(judge, 0.5, 0, 0.5, 0, m * 0.132, intop + m * 0.055, m * 0.222, intop + m * 0.145)
-	judge.pivot_offset = judge.size * 0.5
-	for style in [[lbl_time, 0.04], [lbl_count, 0.051], [lbl_hp, 0.034], [lbl_shield, 0.028],
-			[lbl_boss, 0.034], [lbl_combo, 0.038], [lbl_hint, 0.083], [lbl_notice, 0.037], [lbl_float, 0.031],
-			[go_box.get_child(0), 0.041], [ready_title, 0.051], [lbl_center, 0.040], [ready_knowledge, 0.033]]:
-		style[0].add_theme_font_size_override("font_size", roundi(m * style[1]))
-	for label in [ready_title, lbl_center, ready_knowledge]:
-		label.custom_minimum_size.x = m * 0.77
+	_place_px(timer_panel, 0, 0, 0, 0, left, top, left + stat_w, top + stat_h)
+	_place_px(lbl_count, 0, 0, 0, 0, left, top + stat_h, left + stat_w, top + stat_h * 2.0)
+	_place_px(hearts_box, 0, 0, 0, 0, left, top + stat_h * 2.1, left + stat_w * 0.82, top + stat_h * 3.23)
+	_place_px(shield_box, 0, 0, 0, 0, left, top + stat_h * 3.36, left + stat_w, top + stat_h * 4.46)
+	_place_px(combo_badge, 0, 0, 0, 0, right - stat_w, voice_y + top_h + 16.0 * u, right, voice_y + top_h + 65.0 * u)
 
-	_place_px(btn_accel, 1, 1, 1, 1, -g - inr - a, -g - inb - ah, -g - inr, -g - inb)
-	_place_px(btn_brake, 0, 1, 0, 1, g + inl, -g - inb - bh, g + inl + b, -g - inb)
-	var sw := m * 0.30; var sh := sw * 130.0 / 240.0
-	_place_px(speedo, 0.5, 1, 0.5, 1, -sw * 0.5, -g - inb - sh, sw * 0.5, -g - inb)
-	speedo_needle.size = Vector2(12, 44) * (sh / 130.0)
-	speedo_needle.pivot_offset = Vector2(speedo_needle.size.x * 0.5, speedo_needle.size.y * 0.9)
-	# Dial centre in the 240 × 130 speedometer artwork.
-	speedo_needle.position = Vector2(sw * 69.0 / 240.0, sh * 65.0 / 130.0) - speedo_needle.pivot_offset
-	_place_px(lbl_speed, 0.43, 0, 1, 1, 0, 0, -sw * 0.055, -sh * 0.08)
-	lbl_speed.add_theme_font_size_override("font_size", maxi(12, int(sh * 0.2)))
-	lbl_speed.clip_text = true
-	var lw := m * 0.18; var lh := lw * 130.0 / 160.0
-	var lock_bottom := -g - inb - ah - g * 0.5
-	_place_px(btn_lock, 1, 1, 1, 1, -g - inr - lw, lock_bottom - lh, -g - inr, lock_bottom)
-	_place_px(btn_pause, 1, 0, 1, 0, -g - inr - t, g + intop, -g - inr, g + intop + t * 158.0 / 148.0)
-	_place_px(btn_voice, 1, 0, 1, 0, -g - inr - t, g + intop + t + g * 0.6, -g - inr, g + intop + t + g * 0.6 + t)
-	for p in [btn_accel, btn_brake, btn_lock, btn_pause, btn_voice]:
-		var lab: Label = p.get_child(0)
-		var label_scale := 0.17
-		if p == btn_lock:
-			label_scale = 0.23
-		elif p == btn_voice:
-			label_scale = 0.26
-		lab.add_theme_font_size_override("font_size", maxi(12, roundi(p.size.y * label_scale)))
-	lbl_lock_kmh.add_theme_font_size_override("font_size", maxi(10, int(lh * 0.26)))
-	if pad_bar != null and is_instance_valid(pad_bar):
-		_place_px(pad_bar, 0, 1, 1, 1, inl + m * 0.25, -inb - m * 0.048, -inr - m * 0.25, -inb - m * 0.008)
-		pad_bar.add_theme_font_size_override("font_size", roundi(m * 0.030))
+	_place_px(lbl_listen, 0, 0, 0, 0, middle - cue_w * 0.5, cue_y, middle + cue_w * 0.5, cue_y + 43.0 * u)
+	_place_px(lbl_hint, 0, 0, 0, 0, middle - cue_w * 0.5, cue_y + 43.0 * u, middle + cue_w * 0.5, cue_y + 128.0 * u)
+	_place_px(go_box, 0, 0, 0, 0, middle - 85.0 * u, cue_y - 73.0 * u, middle + 85.0 * u, cue_y - 16.0 * u)
+	_place_px(judge, 0, 0, 0, 0, middle - 85.0 * u, cue_y - 73.0 * u, middle + 85.0 * u, cue_y - 16.0 * u)
+	# Auxiliary feedback occupies two rows above the listening card.
+	_place_px(lbl_notice, 0, 0, 0, 0, middle - 197.0 * u, top, middle + 197.0 * u, top + 48.0 * u)
+	_place_px(lbl_float, 0, 0, 0, 0, middle - 197.0 * u, top + 48.0 * u, middle + 197.0 * u, top + 91.0 * u)
+
+	_place_px(btn_pause, 0, 0, 0, 0, right - top_w, top, right, top + top_h)
+	_place_px(btn_voice, 0, 0, 0, 0, right - top_w, voice_y, right, voice_y + top_h)
+	_place_px(btn_accel, 0, 0, 0, 0, right - control_w, bottom - control_h, right, bottom)
+	_place_px(btn_brake, 0, 0, 0, 0, left, bottom - control_h, left + control_w, bottom)
+	_place_px(btn_lock, 0, 0, 0, 0, right - control_w, bottom - control_h - 124.0 * u, right, bottom - control_h - 13.0 * u)
+	var speed_left := left + control_w + 20.0 * u if wide else middle - 130.0 * u
+	_place_px(speedo, 0, 0, 0, 0, speed_left, bottom - 91.0 * u, speed_left + 260.0 * u, bottom)
+	_place_px(pad_bar, 0, 0, 0, 0, left, bottom + 4.0 * u, right, bottom + 46.0 * u)
+	for entry in [[lbl_time, 31], [lbl_count, 30], [lbl_hp, 29], [lbl_shield, 24], [lbl_boss, 29],
+			[lbl_combo, 28], [lbl_listen, 31], [lbl_hint, 66], [lbl_notice, 26], [lbl_float, 24],
+			[go_box, 27], [judge, 42], [lbl_speed, 32], [pad_bar, 24], [lbl_lock_kmh, 25]]:
+		entry[0].add_theme_font_size_override("font_size", roundi(float(entry[1]) * u))
+	for button in [btn_pause, btn_voice, btn_accel, btn_brake, btn_lock]:
+		button.get_child(0).add_theme_font_size_override("font_size", roundi((27.0 if button == btn_lock else 33.0) * u))
+	for badge in [lbl_badge_brake, lbl_badge_accel, lbl_badge_voice, lbl_badge_lock]:
+		badge.add_theme_font_size_override("font_size", roundi(23.0 * u))
+
+	var ready_w: float = (0.40 if wide else 0.80) * u * 1080.0
+	var ready_left: float = left if wide else middle - ready_w * 0.5
+	var ready_top: float = top + (220.0 if wide else 120.0) * u
+	_place_px(ready_box, 0, 0, 0, 0, ready_left, ready_top, ready_left + ready_w, ready_top)
+	for entry in [[ready_title, 46], [lbl_center, 34], [ready_knowledge, 28]]:
+		var label: Label = entry[0]
+		label.custom_minimum_size.x = ready_w - 64.0
+		label.add_theme_font_size_override("font_size", roundi(float(entry[1]) * u))
 
 func show_select() -> void:
+	if is_instance_valid(achievement_toast):
+		achievement_toast.hide()
 	_end_tutorial()
 	is_endless = false
 	is_drill = false
@@ -4285,21 +4093,17 @@ func show_select() -> void:
 	level_buttons.clear()
 	var insets: Dictionary = get_safe_insets()
 	var vs: Vector2 = get_viewport().get_visible_rect().size
-	var landscape := vs.x >= vs.y
-	var available_w: float = vs.x - 48.0 - float(insets.left) - float(insets.right)
-	var w: float = clampf(available_w * 0.54, 760.0, 960.0) if landscape else clampf(available_w, 640.0, 840.0)
-
-	if select_box != null and select_box.get_child_count() > 0:
-		var pc := select_box.get_child(0) as PanelContainer
-		if pc != null:
-			var ssb := StyleBoxFlat.new()
-			ssb.bg_color = Color(0.03, 0.04, 0.09, 0.95)
-			ssb.border_width_left = 2; ssb.border_width_top = 2; ssb.border_width_right = 2; ssb.border_width_bottom = 2
-			ssb.border_color = Color(0.18, 0.85, 1.0, 0.65)
-			ssb.set_corner_radius_all(14)
-			ssb.set_content_margin_all(16)
-			pc.add_theme_stylebox_override("panel", ssb)
-			pc.custom_minimum_size.x = w
+	var available_w: float = vs.x - 92.0 - float(insets.left) - float(insets.right)
+	var w := clampf(available_w, 640.0, 880.0)
+	select_columns = BoxContainer.new()
+	select_columns.add_theme_constant_override("separation", 24)
+	select_list.add_child(select_columns)
+	select_toolbar = VBoxContainer.new()
+	select_toolbar.add_theme_constant_override("separation", 14)
+	var toolbar_sheet := PanelContainer.new()
+	toolbar_sheet.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	select_columns.add_child(toolbar_sheet)
+	toolbar_sheet.add_child(select_toolbar)
 
 	var rank_info: Dictionary = save.get_player_rank()
 	var daily_info: Dictionary = save.check_daily_status()
@@ -4309,12 +4113,12 @@ func show_select() -> void:
 	var th_sb := StyleBoxFlat.new()
 	th_sb.bg_color = Color(0.04, 0.06, 0.14, 0.95)
 	th_sb.border_width_left = 2; th_sb.border_width_top = 2; th_sb.border_width_right = 2; th_sb.border_width_bottom = 2
-	th_sb.border_color = Color(0.2, 0.85, 1.0, 0.55)
-	th_sb.set_corner_radius_all(10)
+	th_sb.border_color = Color(AMBER, 0.55)
+
 	th_sb.set_content_margin_all(8)
 	top_hud.add_theme_stylebox_override("panel", th_sb)
-	top_hud.custom_minimum_size = Vector2(w, 54 * UI)
-	select_list.add_child(top_hud)
+	top_hud.custom_minimum_size = Vector2(w, 48 * UI)
+	select_toolbar.add_child(top_hud)
 
 	var th_hbox := HBoxContainer.new()
 	th_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -4322,20 +4126,23 @@ func show_select() -> void:
 	top_hud.add_child(th_hbox)
 
 	var lbl_rank := Label.new()
-	lbl_rank.text = "◆ %s %s" % [rank_info.badge, rank_info.title]
+	lbl_rank.text = "◆ %s %s" % [I18n.t(str(rank_info.get("badge_key", "")), str(rank_info.badge)), I18n.t(str(rank_info.get("title_key", "")), str(rank_info.title))]
 	lbl_rank.add_theme_font_override("font", Assets.FONT_HUD)
 	lbl_rank.add_theme_font_size_override("font_size", int(18 * UI))
-	lbl_rank.add_theme_color_override("font_color", rank_info.color)
+	lbl_rank.add_theme_color_override("font_color", INK)
 	th_hbox.add_child(lbl_rank)
 
 	var title := Label.new()
-	title.text = "【 %s 】" % I18n.t("TITLE_SELECT", "任務選關 MISSION SELECT")
+	title.text = I18n.t("TITLE_SELECT", "選關")
 	title.add_theme_font_override("font", Assets.FONT_HUD)
 	title.add_theme_font_size_override("font_size", int(20 * UI))
 	title.add_theme_color_override("font_color", Color(1.0, 0.95, 0.85))
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	th_hbox.add_child(title)
+	title.add_theme_font_size_override("font_size", 50)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	select_toolbar.add_child(title)
+	select_toolbar.move_child(title, 0)
 
 	lbl_points = Label.new()
 	lbl_points.text = I18n.t("POINTS_UNREADABLE", "讀不到紀錄") if save.unreadable else (I18n.t("POINTS_TOTAL", "◆ 總點數 %d") % save.points())
@@ -4343,69 +4150,73 @@ func show_select() -> void:
 		lbl_points.text += I18n.t("POINTS_PENDING", "・未存檔")
 	lbl_points.add_theme_font_override("font", Assets.FONT_HUD)
 	lbl_points.add_theme_font_size_override("font_size", int(17 * UI))
-	lbl_points.add_theme_color_override("font_color", Color(0.85, 0.55, 1.0))
+	lbl_points.add_theme_color_override("font_color", AMBER)
 	th_hbox.add_child(lbl_points)
 
 	var lbl_streak := Label.new()
 	lbl_streak.text = "★ %s %d %s" % [I18n.t("DAILY_STREAK_PRE", "連續"), daily_info.streak, I18n.t("DAILY_STREAK_POST", "天")]
 	lbl_streak.add_theme_font_override("font", Assets.FONT_HUD)
 	lbl_streak.add_theme_font_size_override("font_size", int(17 * UI))
-	lbl_streak.add_theme_color_override("font_color", Color(1.0, 0.65, 0.2))
+	lbl_streak.add_theme_color_override("font_color", MUTED)
 	th_hbox.add_child(lbl_streak)
 
 	# 2. Featured Daily Challenge (btn_daily)
 	btn_daily = _button(I18n.t("BTN_DAILY_RUN", "★ 今日特快 (獎勵 +100點)") if not daily_info.completed else I18n.t("BTN_DAILY_DONE", "★ 今日特快 (今日已達成 ★★★)"))
-	_art_button(btn_daily, "btn_primary" if not daily_info.completed else "btn_secondary", 32)
-	btn_daily.custom_minimum_size = Vector2(w, 52 * UI)
+	_style_button(btn_daily, "btn_primary" if not daily_info.completed else "btn_secondary")
+	btn_daily.custom_minimum_size = Vector2(w, 60 * UI)
 	btn_daily.add_theme_font_size_override("font_size", int(20 * UI))
 	btn_daily.pressed.connect(start_daily_run)
-	select_list.add_child(btn_daily)
+	btn_daily.visible = _meta_unlocked()
+	select_toolbar.add_child(btn_daily)
 
 	# 3. 4-Column Navigation Bar
 	var nav_grid := GridContainer.new()
 	nav_grid.columns = 4
 	nav_grid.add_theme_constant_override("h_separation", 8)
 	nav_grid.add_theme_constant_override("v_separation", 8)
-	select_list.add_child(nav_grid)
+	select_toolbar.add_child(nav_grid)
 
 	var nav_btn_w := (w - 24.0) / 4.0
 
 	btn_chart = _button(I18n.t("BTN_CHART", "五十音・特訓"))
-	_art_button(btn_chart, "btn_secondary", 32)
+	_style_button(btn_chart, "btn_secondary")
 	btn_chart.custom_minimum_size = Vector2(nav_btn_w, 46 * UI)
 	btn_chart.add_theme_font_size_override("font_size", int(16 * UI))
 	btn_chart.pressed.connect(func(): show_chart())
 	nav_grid.add_child(btn_chart)
 
 	btn_endless = _button(I18n.t("BTN_ENDLESS", "★無盡挑戰"))
-	_art_button(btn_endless, "btn_primary", 32)
+	_style_button(btn_endless, "btn_primary")
 	btn_endless.custom_minimum_size = Vector2(nav_btn_w, 46 * UI)
 	btn_endless.add_theme_font_size_override("font_size", int(16 * UI))
 	btn_endless.pressed.connect(show_endless)
+	btn_endless.visible = _meta_unlocked()
 	nav_grid.add_child(btn_endless)
 
 	btn_shop = _button(I18n.t("BTN_SHOP", "改裝商城"))
-	_art_button(btn_shop, "btn_secondary", 32)
+	_style_button(btn_shop, "btn_secondary")
 	btn_shop.custom_minimum_size = Vector2(nav_btn_w, 46 * UI)
 	btn_shop.add_theme_font_size_override("font_size", int(16 * UI))
 	btn_shop.pressed.connect(show_shop)
+	btn_shop.visible = _meta_unlocked()
 	nav_grid.add_child(btn_shop)
 
 	btn_achievements = _button(I18n.t("BTN_ACHIEVEMENTS", "成就獎章"))
-	_art_button(btn_achievements, "btn_secondary", 32)
+	_style_button(btn_achievements, "btn_secondary")
 	btn_achievements.custom_minimum_size = Vector2(nav_btn_w, 46 * UI)
 	btn_achievements.add_theme_font_size_override("font_size", int(16 * UI))
 	btn_achievements.pressed.connect(show_achievements)
+	btn_achievements.visible = _meta_unlocked()
 	nav_grid.add_child(btn_achievements)
 	if progress_pending:
 		var retry_save := _button(I18n.t("BTN_SAVE_RETRY", "重試存檔"))
-		_art_button(retry_save, "btn_small", 32)
+		_style_button(retry_save, "btn_small")
 		retry_save.pressed.connect(_retry_save)
-		select_list.add_child(retry_save)
+		select_toolbar.add_child(retry_save)
 	var tabs := HBoxContainer.new()
 	tabs.alignment = BoxContainer.ALIGNMENT_CENTER
 	tabs.add_theme_constant_override("separation", 10)
-	select_list.add_child(tabs)
+	select_toolbar.add_child(tabs)
 	btn_tab_hira = _button(I18n.t("TAB_HIRA", "平假名")); btn_tab_kata = _button(I18n.t("TAB_KATA", "片假名"))
 	var kata_open := false
 	for i in levels.size():
@@ -4414,16 +4225,16 @@ func show_select() -> void:
 			break
 	for b in [btn_tab_hira, btn_tab_kata]:
 		b.toggle_mode = true
-		_art_button(b, "tab_inactive", 32)
-		b.add_theme_stylebox_override("pressed", _tex_style("tab_active", 32))
-		b.add_theme_stylebox_override("hover_pressed", _tex_style("tab_active", 32))
+		_style_button(b, "tab_inactive")
+		b.add_theme_stylebox_override("pressed", _control_style("tab_active"))
+		b.add_theme_stylebox_override("hover_pressed", _control_style("tab_active"))
 		b.custom_minimum_size = Vector2(w * 0.5 - 5, clampf(w * 0.5 * 110.0 / 470.0, 48.0 * UI, 64.0 * UI))
 		b.add_theme_font_size_override("font_size", int(24 * UI))
 		tabs.add_child(b)
 	btn_tab_kata.disabled = not kata_open
 	if btn_tab_kata.disabled:
 		btn_tab_kata.text = I18n.t("TAB_KATA_LOCKED", "片假名（鎖定）")
-		btn_tab_kata.add_theme_stylebox_override("disabled", _tex_style("tab_locked", 32))
+		btn_tab_kata.add_theme_stylebox_override("disabled", _control_style("tab_locked"))
 	btn_tab_hira.button_pressed = select_tab == "hira"
 	btn_tab_kata.button_pressed = select_tab == "kata"
 	btn_tab_hira.pressed.connect(_select_kana_tab.bind("hira"))
@@ -4432,11 +4243,11 @@ func show_select() -> void:
 	var drow := HBoxContainer.new()
 	drow.alignment = BoxContainer.ALIGNMENT_CENTER
 	drow.add_theme_constant_override("separation", 10)
-	select_list.add_child(drow)
+	select_toolbar.add_child(drow)
 	var distance_group := ButtonGroup.new()
 	for d in cfg.get("distances", {}).get("order", ["short", "mid", "long"]):
 		var db := _button(distance_name(d))
-		_art_button(db, "dist_selected" if d == distance else "dist_unselected", 32)
+		_style_button(db, "dist_selected" if d == distance else "dist_unselected")
 		db.custom_minimum_size = Vector2(w / 3.0 - 8, clampf((w / 3.0) * 110.0 / 300.0, 46.0 * UI, 58.0 * UI))
 		db.add_theme_font_size_override("font_size", int(22 * UI))
 		db.toggle_mode = true
@@ -4450,8 +4261,9 @@ func show_select() -> void:
 	select_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	select_scroll.follow_focus = true
 	select_scroll.custom_minimum_size.x = w
-	select_list.add_child(select_scroll)
-	_layout_select_scroll()
+	var index_sheet := PanelContainer.new()
+	select_columns.add_child(index_sheet)
+	index_sheet.add_child(select_scroll)
 	var list := VBoxContainer.new()
 	list.add_theme_constant_override("separation", 8)
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -4469,15 +4281,15 @@ func show_select() -> void:
 			zl.add_theme_font_override("font", Assets.FONT_HUD)
 			zl.add_theme_font_size_override("font_size", int(26 * UI))
 			_ink(zl)
-			zl.add_theme_stylebox_override("normal", _tex_style("zone_header_%d" % clampi(zone, 1, 5) if zone > 0 else "zone_header_final", 32, 110))
-			zl.custom_minimum_size = Vector2(w - 20, (w - 20) * 130.0 / 960.0)
+			zl.add_theme_stylebox_override("normal", _surface(Color.TRANSPARENT, Color("5b4e46"), 10.0))
+			zl.custom_minimum_size = Vector2(w - 30.0, 66.0)
 			zl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 			list.add_child(zl)
 		var id := str(L.get("id"))
 		var E := LevelDB.effective(cfg, levels, i, distance)
 		var unlocked := _can_choose_level(i, E)
 		var rec: Dictionary = save.get_record(id, distance)
-		var txt := "      %s  ·  %d%s" % [str(L.get("name", id)), int(E.target_correct), I18n.t("QUESTIONS_UNIT", "題")]
+		var txt := "%s  ·  %d%s" % [str(L.get("name", id)), int(E.target_correct), I18n.t("QUESTIONS_UNIT", "題")]
 		if bool(E.voice_locked):
 			txt += "    " + I18n.t("STAGE_MISSING_VOICE", "缺語音")
 		elif not unlocked:
@@ -4489,13 +4301,13 @@ func show_select() -> void:
 		var b := _button(txt)
 		var typ := str(L.get("type", "normal"))
 		var row_art := "stage_row_locked" if not unlocked else ("stage_row_boss" if typ != "normal" else ("stage_row_cleared" if save.cleared_any(id) else "stage_row_normal"))
-		var rh := clampf((w - 20) * 125.0 / 960.0, 72.0 * UI, 96.0 * UI)
-		_art_button(b, row_art, 40, rh * 0.85)
-		b.add_theme_stylebox_override("pressed", _tex_style("stage_row_selected", 40, rh * 0.85))
-		b.add_theme_stylebox_override("disabled", _tex_style("stage_row_locked", 40, rh * 0.85))
-		b.custom_minimum_size = Vector2(w - 20, rh)
+		var rh := 104.0
+		_style_button(b, row_art, rh * 0.85)
+		b.add_theme_stylebox_override("pressed", _control_style("stage_row_selected", rh * 0.85))
+		b.add_theme_stylebox_override("disabled", _control_style("stage_row_locked", rh * 0.85))
+		b.custom_minimum_size = Vector2(w - 34.0, rh)
 		b.add_theme_font_size_override("font_size", int(22 * UI))
-		# kana badge (left 126x126 of the row) - Zen Maru label with glowing tile background
+		# Stage marker and title have separate rectangles.
 		var badge := Label.new()
 		var rws: Array = L.get("rows", [])
 		badge.text = "" if not unlocked else (str(rws[0]).substr(0, 1) if rws.size() > 0 and typ == "normal" else ("★" if typ != "normal" else ""))
@@ -4514,24 +4326,26 @@ func show_select() -> void:
 		level_buttons.append(b)
 		if unlocked:
 			first_scroll_target = b
-	var footer := HBoxContainer.new()
+	select_footer = BoxContainer.new()
+	var footer := select_footer
+	footer.alignment = BoxContainer.ALIGNMENT_CENTER
 	footer.add_theme_constant_override("separation", 10)
 	select_list.add_child(footer)
 	var f_btn_w := (w - 20.0) / 3.0
 	var tutorial_recommended: bool = lane_count == 3 and save.data.levels.is_empty() and not bool(save.get_setting("tutorial_seen", false))
 	btn_tutorial = _button("新手練習 · 3 題")
-	_art_button(btn_tutorial, "btn_primary" if tutorial_recommended else "btn_secondary", 32)
+	_style_button(btn_tutorial, "btn_primary" if tutorial_recommended else "btn_secondary")
 	btn_tutorial.custom_minimum_size = Vector2(f_btn_w, 56 * UI)
 	btn_tutorial.disabled = lane_count != 3
 	btn_tutorial.pressed.connect(start_tutorial)
 	footer.add_child(btn_tutorial)
 	btn_settings = _button("")
-	_art_button(btn_settings, "btn_secondary", 32)
+	_style_button(btn_settings, "btn_secondary")
 	btn_settings.custom_minimum_size = Vector2(f_btn_w, 56 * UI)
 	btn_settings.pressed.connect(show_settings)
 	footer.add_child(btn_settings)
 	btn_to_title = _button(I18n.t("BTN_TO_TITLE", "回主畫面"))
-	_art_button(btn_to_title, "btn_secondary", 32)
+	_style_button(btn_to_title, "btn_secondary")
 	btn_to_title.custom_minimum_size = Vector2(f_btn_w, 56 * UI)
 	btn_to_title.add_theme_font_size_override("font_size", int(18 * UI))
 	btn_to_title.pressed.connect(func():
@@ -4539,7 +4353,9 @@ func show_select() -> void:
 	)
 	footer.add_child(btn_to_title)
 	_refresh_mode_buttons()
+	_layout_select_scroll()
 	select_box.visible = true
+	_flush_toasts()
 	if tutorial_recommended:
 		btn_tutorial.grab_focus()
 	elif first_scroll_target != null:
@@ -4618,7 +4434,7 @@ func _continue_from_tutorial() -> void:
 func _build_tutorial_hud() -> void:
 	tutorial_panel = PanelContainer.new()
 	tutorial_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var panel_style := _tex_style("panel_9slice", 44)
+	var panel_style := _paper_style(20.0)
 	panel_style.set_content_margin_all(24)
 	tutorial_panel.add_theme_stylebox_override("panel", panel_style)
 	hud.add_child(tutorial_panel)
@@ -4637,10 +4453,10 @@ func _build_tutorial_hud() -> void:
 	tutorial_actions.add_theme_constant_override("separation", 12)
 	stack.add_child(tutorial_actions)
 	var back := _button("回選關")
-	_art_button(back, "btn_secondary", 32)
+	_style_button(back, "btn_secondary")
 	back.pressed.connect(show_select)
 	btn_tutorial_continue = _button("開始第一關")
-	_art_button(btn_tutorial_continue, "btn_primary", 32)
+	_style_button(btn_tutorial_continue, "btn_primary")
 	btn_tutorial_continue.pressed.connect(_continue_from_tutorial)
 	for button in [back, btn_tutorial_continue]:
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -4669,22 +4485,23 @@ func _refresh_tutorial(feedback := "") -> void:
 	var complete := tutorial_step == TUTORIAL_ROWS.size()
 	tutorial_actions.visible = complete
 	if complete:
-		lbl_tutorial_title.text = "練習完成"
-		lbl_tutorial.text = "正式關卡會計時，也能重播。"
+		lbl_tutorial_title.text = I18n.t("TUT_DONE_TITLE", "練習完成")
+		lbl_tutorial.text = I18n.t("TUT_DONE_BODY", "正式關卡會計時，也能重播。")
 	else:
-		lbl_tutorial_title.text = "新手練習 %d / %d · 不計時" % [tutorial_step + 1, TUTORIAL_ROWS.size()]
-		lbl_tutorial.text = feedback if feedback != "" else TUTORIAL_ROWS[tutorial_step].prompt
+		lbl_tutorial_title.text = I18n.t("TUT_TITLE", "新手練習 %d / %d · 不計時") % [tutorial_step + 1, TUTORIAL_ROWS.size()]
+		lbl_tutorial.text = feedback if feedback != "" else I18n.t(str(TUTORIAL_ROWS[tutorial_step].prompt_key), "")
 		if tutorial_step == 0 and feedback == "":
-			lbl_tutorial.text += "\n連按加速鍵或空白鍵來提速。" if speed_mode == "step" else "\n按住加速鍵或空白鍵。"
+			lbl_tutorial.text += "\n" + (I18n.t("TUT_STEP_HINT", "連按加速鍵或空白鍵來提速。") if speed_mode == "step" else I18n.t("TUT_RACE_HINT", "按住加速鍵或空白鍵。"))
 	_layout_tutorial()
 
 func _resolve_tutorial(row: Dictionary, hit: int) -> void:
 	var needs_replay := tutorial_step == TUTORIAL_ROWS.size() - 1 and not tutorial_replayed
 	var feedback := ""
+	var impact_lead := 0.0
 	if needs_replay:
 		feedback = "先按「重播」或 E。\n再撞上聽到的石碑。"
 	elif hit == row.target:
-		_fx_correct(row.stones[hit])
+		impact_lead = _fx_correct(row.stones[hit])
 		tutorial_step += 1
 	else:
 		feedback = "對應的字是「%s」。\n跟著聲音再試一次。" % row.kana[row.target]
@@ -4700,7 +4517,7 @@ func _resolve_tutorial(row: Dictionary, hit: int) -> void:
 		return
 	_refresh_tutorial(feedback)
 	_spawn_rows()
-	_activate_next()
+	_activate_next(impact_lead)
 
 static func _stars_text(n: int) -> String:
 	var t := ""
@@ -4805,17 +4622,20 @@ func _cycle_vol(key: String, default_val: float) -> void:
 	else:
 		sfx("tap")
 
-func sfx(name: String, pitch := 1.0, vol := 0.0) -> void:
-	var st: AudioStream = Assets.SFX.get(name)
+func sfx(name: String, pitch := 1.0, vol := 0.0) -> bool:
+	return _play_sfx(Assets.SFX.get(name), pitch, vol)
+
+func _play_sfx(st: AudioStream, pitch: float, vol: float) -> bool:
 	if st == null:
-		return
+		return false
 	for p in sfx_pool:
 		if not p.playing:
 			p.stream = st
 			p.pitch_scale = pitch
 			p.volume_db = vol
 			p.play()
-			return
+			return true
+	return false
 
 func _exit_tree() -> void:
 	for p in [voice, music] + sfx_pool:
@@ -4825,9 +4645,7 @@ func _exit_tree() -> void:
 
 # ---------------------------------------------------------------- run
 func reset_run() -> void:
-	speedlines_intensity = 0.0
-	if speedlines_mat != null:
-		speedlines_mat.set_shader_parameter("intensity", 0.0)
+	runner.reset_pose()
 	if hit_flash != null:
 		hit_flash.color = Color(1.0, 1.0, 1.0, 0.0)
 	if hp_flash_tween != null:
@@ -4847,7 +4665,7 @@ func reset_run() -> void:
 	else:
 		rng.randomize()
 	elapsed = 0.0; penalty = 0.0; shield_bonus = 0.0; correct = 0; wrong = 0; missed = 0
-	endless_slow_timer = 0.0; endless_drain_tick = 0.0; runner_opacity = 1.0
+	endless_slow_timer = 0.0; endless_drain_tick = 0.0
 	player_dist = 0.0; lane = 1; player_x = lane_x(lane); q_counter = 0
 	question_draws.clear()
 	ctrl.reset()
@@ -4896,22 +4714,19 @@ func reset_run() -> void:
 		row_spacing = 26.0
 		miss_damage = 15
 		wrong_damage = 30
-		ready_title.text = "★ 無盡極限挑戰 ★\n生存極限・WAVE 1"
-		ready_knowledge.text = "速度隨波次攀升，考驗即時聽辨反應！每 10 連擊恢復體力。"
+		ready_title.text = I18n.t("ENDLESS_READY_TITLE", "無盡極限挑戰\n生存極限・WAVE 1")
+		ready_knowledge.text = I18n.t("ENDLESS_READY_BODY", "速度隨波次攀升。每 10 連擊恢復體力。")
 	else:
 		ready_title.text = "%s\n%s・%d 題" % [str(lvl.get("name", "Level 1")), distance_name(), int(lvl.target_correct)]
-		ready_knowledge.text = str(lvl.get("knowledge", ""))
+		ready_knowledge.text = I18n.knowledge(str(lvl.get("id", "")), str(lvl.get("knowledge", "")))
 	lbl_center.text = I18n.t("HUD_CONTROLS_HELP", "%s\n滑動／← → 換線・E 重播\n點畫面或按空白鍵開始") % speed_help
 	lbl_float.text = ""
 	voice.stop()
 	if music.playing:
 		music.stop()
-	# Refill the starting roadside after the previous run recycled its sprites.
-	prop_rng.seed = 12345
-	for key in next_prop:
-		next_prop[key] = 0.0
-	for prop in props:
-		prop.hide()
+	var preview = active_row()
+	if preview != null:
+		_focus_row(preview)
 	_update_view(0.0)
 	_update_hud()
 	if is_tutorial_active():
@@ -4919,6 +4734,10 @@ func reset_run() -> void:
 
 func start_run() -> void:
 	state = State.RUNNING
+	if achievement_toast != null:
+		achievement_toast.visible = false
+	if toast_tween != null and toast_tween.is_valid():
+		toast_tween.kill()
 	select_box.visible = false
 	results_box.visible = false
 	lbl_center.text = ""
@@ -4947,11 +4766,10 @@ func _go_pop() -> void:
 func _judge(ok: bool) -> void:
 	if judge_tween != null and judge_tween.is_running():
 		judge_tween.kill()
-	judge.texture = Art.UI.judge_ok if ok else Art.UI.judge_ng
+	judge.text = "○" if ok else "×"
+	judge.add_theme_color_override("font_color", AMBER if ok else Color("e2a899"))
 	judge.modulate.a = 1.0
-	judge.scale = Vector2(1.1, 1.1)
 	judge_tween = create_tween().set_parallel(true)
-	judge_tween.tween_property(judge, "scale", Vector2.ONE, 0.10)
 	judge_tween.tween_property(judge, "modulate:a", 0.0, 0.22).set_delay(0.17)
 
 func clock() -> float:
@@ -4987,12 +4805,12 @@ func _spawn_rows() -> void:
 
 func _add_row(kana: Array, target: int, dist: float, is_review := false, from_requeue := false) -> void:
 	var node := Node3D.new()
-	node.position = Vector3(0, 0, -dist)
+	node.position.z = RUNNER_FOREGROUND_OFFSET - dist * STREET_DISTANCE_SCALE
 	add_child(node)
 	var stones: Array = []
 	for i in kana.size():
 		var st := _make_stone(str(kana[i]))
-		st.position = Vector3(lane_x(i), TABLET_H * 0.5, 0)
+		st.position.x = lane_x(i)
 		node.add_child(st)
 		stones.append(st)
 	var row := {"dist": dist, "kana": kana, "target": target, "node": node,
@@ -5001,98 +4819,54 @@ func _add_row(kana: Array, target: int, dist: float, is_review := false, from_re
 	_apply_row_labels(row)
 	rows.append(row)
 
-## Solid bevelled stone; labels and shield overlays sit in front of its face.
-const TABLET_H := StoneTablet.HEIGHT
+## The solid part of the painted silhouette spans the configured collision width.
+## A level camera keeps the tablet upright and the billboard glyph square.
 func _make_stone(k: String) -> MeshInstance3D:
 	var st := MeshInstance3D.new()
 	if stone_mesh == null:
-		stone_mesh = StoneTablet.make_mesh()
+		stone_mesh = QuadMesh.new()
+		var tex_size := Art.NIGHT_SLATE.get_size()
+		stone_mesh.size = Vector2(stone_w, stone_w * tex_size.y / tex_size.x)
+		stone_mesh.center_offset.y = stone_mesh.size.y * 0.5
 		stone_material = ShaderMaterial.new()
-		stone_material.shader = StoneTablet.SHADER
+		stone_material.shader = preload("res://shaders/night_slate.gdshader")
+		stone_material.set_shader_parameter("painted_slate", Art.NIGHT_SLATE)
 	st.mesh = stone_mesh
 	st.material_override = stone_material
+	st.add_child(_contact_shadow(Vector2(stone_w * 1.32, 0.75)))
+
 	var lab := Label3D.new()
 	lab.name = "Kana"
 	lab.font = Art.FONT_KANA
-	lab.font_size = 160
-	lab.pixel_size = 0.0074
-	lab.outline_size = 14
-	lab.modulate = Color("ffffff")
-	lab.outline_modulate = Color("0d131e")
-	# Keep the glyph in front of the tablet and shield at close range in Compatibility.
-	lab.position = Vector3(0, -0.02, StoneTablet.FRONT + 0.035)
+	lab.pixel_size = stone_w / 150.0
+	lab.outline_size = 4
+	lab.modulate = Color("bdc0c7")
+	lab.outline_modulate = Color("191d28")
+	lab.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lab.position = Vector3(0.0, stone_mesh.size.y * 0.55, 0.018)
 	lab.text = k
+	lab.hide()
 	st.add_child(lab)
-	var ov := MeshInstance3D.new()
-	ov.name = "ShieldOv"
-	var oq := QuadMesh.new(); oq.size = Vector2(TABLET_H * 340.0 / 288.0, TABLET_H * 360.0 / 288.0)
-	ov.mesh = oq
-	var om := StandardMaterial3D.new()
-	om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	om.albedo_texture = Art.TABLET_SHIELD
-	om.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	ov.material_override = om
-	ov.position.z = StoneTablet.FRONT + 0.01
-	ov.visible = false
-	st.add_child(ov)
-	var fx := Sprite3D.new()
-	fx.name = "ShieldFx"
-	fx.shaded = false
-	fx.texture = Art.SHIELD.loop
-	fx.hframes = 8
-	fx.pixel_size = TABLET_H * 1.5 / 256.0
-	fx.position.z = StoneTablet.FRONT + 0.02
-	fx.visible = false
-	st.add_child(fx)
-	var focus_frame := MeshInstance3D.new()
-	focus_frame.name = "FocusFrame"
-	var focus_quad := QuadMesh.new(); focus_quad.size = Vector2(StoneTablet.WIDTH + 0.1, 0.09)
-	focus_frame.mesh = focus_quad
-	var focus_material := ShaderMaterial.new()
-	focus_material.shader = preload("res://shaders/tablet_focus.gdshader")
-	focus_frame.material_override = focus_material
-	focus_frame.position = Vector3(0, -TABLET_H * 0.5 + 0.055, StoneTablet.FRONT + 0.025)
-	focus_frame.visible = false
-	st.add_child(focus_frame)
+
+	var mark := Label3D.new()
+	mark.name = "FocusFrame"
+	mark.text = "━"
+	mark.font = Art.FONT_KANA
+	mark.font_size = 96
+	mark.pixel_size = lab.pixel_size
+	mark.outline_size = 0
+	mark.modulate = Color("d6a469")
+	mark.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	mark.position = Vector3(0.0, stone_mesh.size.y * 0.10, 0.025)
+	mark.hide()
+	st.add_child(mark)
 	return st
-
-## Boss shield VFX: appear (8f) -> loop (8f) on the stones of rows ahead; hit (6f) / break (10f) one-shots. 24 fps.
-var _shield_fx_t := 0.0
-var _shield_fx_anim := ""
-var _shield_was_up := false
-func _shield_fx(anim: String) -> void:
-	_shield_fx_anim = anim
-	_shield_fx_t = 0.0
-
-func _tick_shield_fx(dt: float) -> void:
-	if not _shield_was_up and boss_shield_up:
-		_shield_fx("appear")
-	elif _shield_was_up and not boss_shield_up and state == State.RUNNING:
-		_shield_fx("break")
-	_shield_was_up = boss_shield_up
-	_shield_fx_t += dt
-	var frames := {"appear": 8, "loop": 8, "hit": 6, "break": 10}
-	var f := int(_shield_fx_t * 24.0)
-	if _shield_fx_anim != "" and _shield_fx_anim != "loop" and f >= int(frames[_shield_fx_anim]):
-		_shield_fx_anim = "loop" if boss_shield_up else ""
-		_shield_fx_t = 0.0; f = 0
-	for r in rows:
-		for st in r.stones:
-			if not is_instance_valid(st): continue
-			var fx: Sprite3D = st.get_node("ShieldFx")
-			var on: bool = (boss_shield_up or _shield_fx_anim == "break") and not r.resolved and _shield_fx_anim != ""
-			st.get_node("ShieldOv").visible = boss_shield_up and not r.resolved
-			fx.visible = on
-			if on:
-				fx.texture = Art.SHIELD[_shield_fx_anim]
-				fx.hframes = int(frames[_shield_fx_anim])
-				fx.frame = (f % fx.hframes) if _shield_fx_anim == "loop" else mini(f, fx.hframes - 1)
 
 func _apply_row_labels(row: Dictionary) -> void:
 	for i in row.stones.size():
 		var lab := row.stones[i].get_node("Kana") as Label3D
 		lab.text = row.kana[i] if i < row.kana.size() else ""
-		lab.font_size = 160 if lab.text.length() < 2 else 100
+		lab.font_size = 150 if lab.text.length() < 2 else 83
 
 ## Wrong hit: the next row becomes the same question with the correct kana in a different lane.
 func _retry_in_next_row(after_row: Dictionary, kana: String, avoid_lane: int) -> void:
@@ -5135,9 +4909,9 @@ func _focus_row(row: Dictionary) -> void:
 		stone.get_node("FocusFrame").visible = true
 		var glyph := stone.get_node("Kana") as Label3D
 		glyph.modulate = Color("fff4d9")
-		glyph.outline_size = 12
+		glyph.show()
 
-func _activate_next() -> void:
+func _activate_next(impact_lead := 0.0) -> void:
 	var r = active_row()
 	if r == null or r.voice_t >= 0.0:
 		return
@@ -5145,8 +4919,11 @@ func _activate_next() -> void:
 	r.q = q_counter
 	r.voice_t = elapsed
 	_focus_row(r)
-	if is_tutorial_active():
+	if impact_lead > 0.0:
+		r.voice_due = elapsed + impact_lead
+	else:
 		play_voice(r)
+	if is_tutorial_active():
 		return
 	var k: String = r.kana[r.target]
 	if r.get("review", false):
@@ -5154,13 +4931,12 @@ func _activate_next() -> void:
 	var seen: int = appearances.get(k, 0)
 	appearances[k] = seen + 1
 	var progress := float(correct) / maxf(1.0, float(lvl.get("target_correct", 20)))
-	r.hint = Rules.hint_visible(seen, hint_first_n, progress, hint_ratio)
-	if progress >= hint_ratio and not voice_only_announced:
+	r.hint = _show_kana_assist() or Rules.hint_visible(seen, hint_first_n, progress, hint_ratio)
+	if not _show_kana_assist() and progress >= hint_ratio and not voice_only_announced:
 		voice_only_announced = true
 		_notice(I18n.t("HUD_VOICE_ONLY", "聽音模式"))
 	lbl_hint.text = _romaji(k) if r.hint else "?"
-	lbl_hint.modulate.a = 1.0 if r.hint else 0.6
-	play_voice(r)
+	lbl_hint.modulate.a = 1.0
 
 var _romaji_cache := {}
 func _romaji(k: String) -> String:
@@ -5194,6 +4970,8 @@ func _set_combo(v: int) -> void:
 		combo_tween.tween_property(lbl_combo, "scale", Vector2.ONE, 0.16)
 
 func play_voice(r) -> void:
+	if r.erase("voice_due"):
+		r.voice_t = elapsed
 	_play_kana(r.kana[r.target])
 
 func _play_kana(kana: String) -> void:
@@ -5252,8 +5030,8 @@ func _tick(dt: float) -> void:
 			lvl["romaji"] = pool.map(func(k): return rm.get(k, ""))
 			_notice(I18n.t("HUD_ENDLESS_WAVE_BREAK", "★ WAVE %d 突破！極限提速！ ★") % (endless_tier + 1))
 			sfx("star", 1.25, 3.0)
-			_screen_flash(Color(0.2, 0.9, 1.0, 0.2), 0.2)
-			_spawn_shockwave(player.global_position + Vector3(0, 1.0, 0), Color(0.2, 0.9, 1.0), 280.0)
+			_screen_flash(Color(AMBER, 0.06), 0.2)
+			_spawn_shockwave(player.global_position + Vector3(0, 1.0, 0), AMBER, 90.0)
 		if state == State.RUNNING:
 			if ctrl.kmh() < 12.0:
 				endless_slow_timer += dt
@@ -5271,8 +5049,11 @@ func _tick(dt: float) -> void:
 				endless_drain_tick = 0.0
 	_spawn_rows()
 	var r = active_row()
-	if r != null and player_dist >= r.dist:
-		_resolve(r)
+	if r != null:
+		if player_dist >= r.dist:
+			_resolve(r)
+		elif elapsed >= float(r.get("voice_due", INF)):
+			play_voice(r)
 	# cleanup passed rows
 	while rows.size() > 0 and rows[0].resolved and rows[0].dist < player_dist - 15.0:
 		var old = rows.pop_front()
@@ -5288,7 +5069,17 @@ func _tick(dt: float) -> void:
 		_finish(false, "time_up")
 
 func _resolve(r) -> void:
+	# The simulation can step past a row in one frame. Align the break to the
+	# runner's visible contact plane before emitting any fragments or recoil.
+	r.node.position.z = RUNNER_FOREGROUND_OFFSET - player_dist * STREET_DISTANCE_SCALE
 	r.resolved = true
+	for stone in r.stones:
+		stone.get_node("FocusFrame").hide()
+		stone.get_node("Kana").hide()
+		stone.get_node("ContactShadow").hide()
+		var fade: Tween = stone.create_tween()
+		fade.tween_property(stone, "transparency", 1.0, 0.22)
+		fade.tween_callback(stone.hide)
 	var lane_xs: Array = []
 	for i in r.kana.size():
 		lane_xs.append(lane_x(i))
@@ -5300,41 +5091,39 @@ func _resolve(r) -> void:
 	var k: String = r.kana[r.target]
 	var result := "miss"
 	var damage := 0
+	var impact_lead := 0.0
 	if hit == -1:
 		missed += 1
 		var added_time := float(lvl.get("miss_penalty_s", 1.0))
 		penalty += added_time
 		requeue.append(k)          # comes back later (next newly spawned row)
 		_set_combo(0)
-		_fx_miss(r, added_time)
+		_fx_miss(added_time)
 		break_progress = 0
 		damage = miss_damage
 		if is_endless:
 			_float_text("漏答！ -%d" % damage_after_reduction(miss_damage), Color(1.0, 0.4, 0.4))
 	elif hit == r.target:
 		result = "correct"
+		var shield_broke := false
 		if boss_shield_up:
 			result = "shield"
 			break_progress += 1
-			runner.play_once("hit_shield", 8)   # last ~8 frames are already running -> back to run early
-			_shield_fx("hit")
 			if break_progress >= break_chain:
 				boss_shield_up = false
+				shield_broke = true
 				shields_broken += 1
 				shield_bonus += 3.0
 				rumble(0.8, 1.0, 0.35)
 				_notice(I18n.t("HUD_SHIELD_BREAK_NOTICE", "護盾擊破！時間獎勵 -3.0秒"))
 				_float_text(I18n.t("FLOAT_TIME_BONUS", "時間獎勵 -3.0s！"), Color(0.35, 1.0, 0.85))
-				_spawn_shockwave(player.global_position + Vector3(0, 1.2, -1.0), Color(0.4, 0.95, 1.0), 380.0)
-				_screen_flash(Color(0.4, 0.95, 1.0, 0.25), 0.22)
-				_burst(player.global_position + Vector3(0, 1.2, -1.0), Color(0.4, 0.95, 1.0))
-				sfx("shatter", 0.78, 4.0)
-				sfx("star", 1.4, 1.0)
+				_spawn_shockwave(player.global_position + Vector3(0, 1.2, -1.0), AMBER, 110.0)
+				_screen_flash(Color(AMBER, 0.06), 0.22)
 		else:
 			correct += 1
 			_check_boss_shield()
 		_set_combo(combo + 1)
-		_fx_correct(r.stones[hit])
+		impact_lead = _fx_correct(r.stones[hit], result == "shield", shield_broke)
 		if is_endless:
 			var hit_pts: int = int(120.0 * (1.0 + float(combo) * 0.1) * (1.0 + ctrl.kmh() / 50.0))
 			endless_score += hit_pts
@@ -5346,7 +5135,7 @@ func _resolve(r) -> void:
 				_emit_hp()
 				rumble(0.35, 0.5, 0.2)
 				_notice(I18n.t("HUD_ENDLESS_HEAL", "連擊獎勵！HP +%d") % heal)
-				sfx("heal", 1.0, 2.0)
+				sfx("heal", 1.0, -6.0)
 			if correct >= 10: check_achievement("endless_runner")
 			if correct >= 30: check_achievement("endless_survivor")
 			if player_dist >= 1000.0: check_achievement("endless_marathon")
@@ -5357,7 +5146,7 @@ func _resolve(r) -> void:
 		penalty += added_time
 		ctrl.scale_speed(float(cfg.get("speed", {}).get("wrong_hit_speed_factor", 0.5)))
 		_set_combo(0)
-		_fx_wrong(r.stones[hit], r.stones[r.target], added_time)
+		_fx_wrong(r.stones[hit], added_time)
 		_retry_in_next_row(r, k, r.target)
 		break_progress = 0
 		damage = wrong_damage
@@ -5377,7 +5166,7 @@ func _resolve(r) -> void:
 	# Lethal damage writes the result log immediately.
 	take_damage(damage)
 	if state == State.RUNNING and (is_endless or (correct < int(lvl.get("target_correct", 20)) and clock() < float(lvl.get("time_limit_s", 60.0)))):
-		_activate_next()
+		_activate_next(impact_lead)
 
 ## Boss/ultimate: at each threshold of the required count, raise a shield that needs N correct in a row.
 func _check_boss_shield() -> void:
@@ -5411,21 +5200,22 @@ func _finish(cleared: bool, reason := "") -> void:
 			if not daily_res.first_today:
 				save.add_points(50)
 			_persist_progress()
-			sfx("star", 1.3, 3.0)
+			sfx("star", 1.3, -8.0)
 			if daily_res.first_today:
 				_notice(I18n.t("HUD_DAILY_STREAK_POPUP", "★ 今日特快達成！連續第 %d 天！獲得 +100 點") % daily_res.streak)
 		elif is_drill:
 			last_points = correct * 2
 			save.add_points(last_points)
 			_persist_progress()
-			sfx("shatter", 0.8, 2.0)
+			sfx("star", 1.0, -8.0)
 		else:
-			last_record = save.record(level_id, distance, stars, clock())
+			var ranked_stars := 0 if _assist_run() else stars
+			last_record = save.record(level_id, distance, ranked_stars, clock())
 			new_best = bool(last_record.better)
 			last_points = Rules.points_for(bool(last_record.first_clear), int(last_record.new_stars), distance_multiplier(), cfg.get("points", {}))
 			save.add_points(last_points)
 			_persist_progress()
-			sfx("shatter", 0.8, 2.0)
+			sfx("star", 1.1, -8.0)
 			check_achievement("first_step")
 			if stars == 3:
 				check_achievement("three_stars")
@@ -5458,7 +5248,7 @@ func _finish(cleared: bool, reason := "") -> void:
 			grade_col = Color(1.0, 0.85, 0.2)
 		elif stars == 2:
 			grade = "A"
-			grade_col = Color(0.1, 0.95, 1.0)
+			grade_col = AMBER
 		else:
 			grade = "B"
 			grade_col = Color(1.0, 0.45, 0.85)
@@ -5490,7 +5280,9 @@ func _finish(cleared: bool, reason := "") -> void:
 		lbl_result.text += I18n.t("RESULTS_REVIEW_COUNT", "\n待複習 %d 字　%s") % [review_items.size(), kana]
 		if review_items.size() > 4:
 			lbl_result.text += I18n.t("RESULTS_REVIEW_ETC", " 等")
-	var knowledge := str(lvl.get("knowledge", ""))
+	var knowledge := I18n.knowledge(str(lvl.get("id", "")), str(lvl.get("knowledge", "")))
+	if _assist_run():
+		lbl_result.text += I18n.t("ASSIST_RESULT", "\n輔助局不計入星等。")
 	if not knowledge.is_empty():
 		lbl_result.text += I18n.t("RESULTS_KNOWLEDGE", "\n\n小知識：%s") % knowledge
 	res_badge.visible = new_best
@@ -5544,7 +5336,7 @@ func _finish(cleared: bool, reason := "") -> void:
 			tsb.bg_color = Color(0.12, 0.05, 0.08, 0.90)
 			tsb.border_width_left = 2; tsb.border_width_top = 2; tsb.border_width_right = 2; tsb.border_width_bottom = 2
 			tsb.border_color = Color(1.0, 0.35, 0.25, 0.85)
-			tsb.set_corner_radius_all(8)
+
 			tsb.set_content_margin_all(4)
 			tile.add_theme_stylebox_override("panel", tsb)
 			tile.custom_minimum_size = Vector2(48, 52)
@@ -5577,7 +5369,7 @@ func _finish(cleared: bool, reason := "") -> void:
 	# Knowledge capsule
 	if not knowledge.is_empty():
 		res_knowledge_box.visible = true
-		lbl_res_knowledge.text = "【小知識】%s" % knowledge
+		lbl_res_knowledge.text = I18n.t("KNOW_LABEL", "小知識　%s") % knowledge
 	else:
 		res_knowledge_box.visible = false
 	btn_retry.text = I18n.t("BTN_RETRY_DRILL", "再練一次") if is_drill else I18n.t("BTN_RETRY", "重來")
@@ -5591,18 +5383,18 @@ func _finish(cleared: bool, reason := "") -> void:
 		btn_next.visible = false
 		btn_kata_next.visible = false
 	for i in 3:
-		var st_child := res_stars.get_child(i) as TextureRect
+		var st_child := res_stars.get_child(i) as Label
 		st_child.visible = true
 		st_child.pivot_offset = st_child.custom_minimum_size * 0.5
 		if i < stars:
-			st_child.texture = Art.UI.star_full_200
+			st_child.text = "★"
 			st_child.scale = Vector2(0.1, 0.1)
 			var stt := create_tween()
 			stt.tween_interval(0.18 + i * 0.14)
 			stt.tween_property(st_child, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 			stt.tween_callback(func(): sfx("star", 1.0 + i * 0.15, 1.0))
 		else:
-			st_child.texture = Art.UI.star_empty_200
+			st_child.text = "☆"
 			st_child.scale = Vector2.ONE
 	lbl_center.text = ""
 	lbl_hint.text = ""
@@ -5621,6 +5413,7 @@ func _finish(cleared: bool, reason := "") -> void:
 	lbl_hint.visible = true
 	touches.clear()
 	results_box.visible = true
+	_flush_toasts()
 	_update_pad_bar()
 	_update_title_prompts()
 	(btn_save_retry if progress_pending else (btn_review if btn_review.visible and not cleared else btn_retry)).grab_focus()
@@ -5757,7 +5550,7 @@ func _spawn_shockwave(at_3d: Vector3, col: Color = Color(0.35, 0.95, 1.0), max_r
 	sw.position = center_2d
 	sw.ring_color = col
 	sw.current_radius = 12.0 * UI
-	sw.current_alpha = 0.95
+	sw.current_alpha = 0.40
 	sw.current_width = 7.0 * UI
 	fx_layer.add_child(sw)
 
@@ -5766,37 +5559,18 @@ func _spawn_shockwave(at_3d: Vector3, col: Color = Color(0.35, 0.95, 1.0), max_r
 	tw.tween_method(func(v: float):
 		if is_instance_valid(sw):
 			sw.current_radius = lerpf(12.0 * UI, target_r, v)
-			sw.current_alpha = lerpf(0.95, 0.0, v)
+			sw.current_alpha = lerpf(0.40, 0.0, v)
 			sw.current_width = lerpf(7.0 * UI, 1.5 * UI, v)
 			sw.queue_redraw()
 	, 0.0, 1.0, 0.32).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tw.tween_callback(sw.queue_free)
 
 func _screen_flash(c: Color, duration: float = 0.12) -> void:
-	if hit_flash == null or not is_instance_valid(hit_flash):
+	if _reduced_motion() or hit_flash == null or not is_instance_valid(hit_flash):
 		return
-	hit_flash.color = c
+	hit_flash.color = Color(c, minf(c.a, 0.065))
 	var tw := create_tween()
 	tw.tween_property(hit_flash, "color:a", 0.0, duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-
-func _spawn_shatter_sprite(at_3d: Vector3) -> void:
-	if cam == null or not is_instance_valid(cam) or not cam.is_inside_tree() or fx_layer == null:
-		return
-	var sp := Sprite2D.new()
-	sp.texture = Art.TABLET_SHATTER
-	sp.hframes = 8
-	sp.vframes = 1
-	sp.frame = 0
-	sp.position = cam.unproject_position(at_3d)
-	sp.scale = Vector2.ONE * (UI * 1.5)
-	fx_layer.add_child(sp)
-
-	var tw := create_tween()
-	tw.tween_method(func(f: float):
-		if is_instance_valid(sp):
-			sp.frame = clampi(int(f), 0, 7)
-	, 0.0, 7.99, 0.22)
-	tw.tween_callback(sp.queue_free)
 
 func _float_text(t: String, c: Color) -> void:
 	if float_tween != null and float_tween.is_running():
@@ -5827,44 +5601,32 @@ func calc_hit_pitch(cmb: int) -> float:
 	var oct: int = mini(1, (cmb - 1) / 5)
 	return PENTATONIC_RATIOS[step] * (1.0 + float(oct) * 0.28)
 
-func _fx_correct(st: MeshInstance3D) -> void:
+func _fx_correct(st: MeshInstance3D, shield_hit := false, shield_broke := false) -> float:
 	rumble(0.25 if combo < 10 else 0.45, 0.1 if combo < 10 else 0.3, 0.12)
-	var fb: Dictionary = cfg.get("feedback", {})
-	var glow_col := Color(1.0, 0.88, 0.3) if combo >= 10 else Color(0.35, 0.95, 1.0)
-	_glow(st, glow_col, float(fb.get("glow_strength", 4.0)), 0.5)
-	# knockback: stone flies forward and tumbles away from the player
-	var kb := float(fb.get("knockback_distance_m", 7.0))
+	# Preserve the centre-hit direction draw and use it for the slate fragments.
 	var side := signf(st.position.x) if absf(st.position.x) > 0.1 else (1.0 if rng.randf() > 0.5 else -1.0)
-	var tw := create_tween().set_parallel(true)
-	tw.tween_property(st, "position", st.position + Vector3(side * 2.5, 2.5, -kb), 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property(st, "rotation", Vector3(-4.0, side * 3.0, side * 2.0), 0.45)
-	tw.tween_property(st, "scale", Vector3.ONE * 0.2, 0.45).set_delay(0.15)
-	_shatter(st)
-	_sparks(st.global_position)
-	_burst(st.global_position + Vector3(0, 0.5, 0), glow_col)
-	_spawn_shatter_sprite(st.global_position)
-	_spawn_shockwave(st.global_position, glow_col, 220.0 if combo >= 10 else 160.0)
-	_screen_flash(Color(1.0, 0.92, 0.4, 0.14) if combo >= 10 else Color(0.25, 0.88, 1.0, 0.12), 0.12)
-	var target_pitch := calc_hit_pitch(combo)
-	sfx("shatter", target_pitch, 3.0)
-	if combo in [5, 10, 15, 20, 30, 40, 50]:
-		sfx("star", 1.0 + float(mini(combo, 40)) * 0.02, -1.0)
-		if combo >= 10:
-			sfx("focus", 1.25, -2.0)
-	# player punch (scale pop) + tiny FOV punch, no camera shake
-	runner.play_once("hit_correct")
-	var pt := create_tween()
-	pt.tween_property(player_mesh, "scale", Vector3(1.06, 0.96, 1.0), 0.05)
-	pt.tween_property(player_mesh, "scale", Vector3.ONE, 0.15)
-	_glow_player(glow_col, 3.0)
-	var fov_punch := float(fb.get("fov_punch_deg", 4.0))
-	cam.fov = base_fov + fov_punch
+	_shatter(st, side)
+	var impact: AudioStream = Assets.SFX.shatter
+	var pitch := calc_hit_pitch(combo)
+	if shield_broke:
+		impact = Assets.SHIELD_BREAK
+		pitch = 1.0
+	elif combo > 1 and save.get_setting("hit_pitch_mode", "pentatonic") == "pentatonic":
+		var tone := (combo - 1) % 5 + (5 if combo > 5 else 0)
+		impact = Assets.HIT_TONES[tone]
+		pitch = 1.0
+	var impact_played := _play_sfx(impact, pitch, 3.0)
+	if shield_broke:
+		sfx("star", 1.4, -8.0)
+	elif combo in [5, 10, 15, 20, 30, 40, 50]:
+		sfx("star", 1.0 + float(mini(combo, 40)) * 0.02, -8.0)
+	runner.play_once("hit_shield" if shield_hit else "hit_correct")
 	_judge(true)
+	return HIT_VOICE_LEAD_S if impact_played and float(save.get_setting("vol_sfx", 1.0)) > 0.01 else 0.0
 
 ## Multi-chunk 3D fracture trajectory with glowing break surfaces.
-func _shatter(st: MeshInstance3D) -> void:
-	st.transparency = 1.0
-	st.get_node("FocusFrame").hide()
+func _shatter(st: MeshInstance3D, side: float) -> void:
+	st.hide()
 	var chip_data := [
 		[Vector3(-0.45, 0.3, 0.15), Vector3(0.18, 0.14, 0.25), Vector3(-2.8, 2.2, -4.5), Vector3(4.0, -3.0, 2.0)],
 		[Vector3(0.45, 0.35, 0.1), Vector3(0.16, 0.20, 0.22), Vector3(3.0, 2.5, -4.0), Vector3(-3.5, 4.0, -2.5)],
@@ -5877,156 +5639,67 @@ func _shatter(st: MeshInstance3D) -> void:
 		[Vector3(0.2, -0.45, 0.15), Vector3(0.16, 0.14, 0.19), Vector3(1.9, 0.9, -2.8), Vector3(2.5, -3.0, -3.5)],
 		[Vector3(0.0, 0.8, 0.0), Vector3(0.12, 0.10, 0.15), Vector3(0.2, 3.8, -4.8), Vector3(6.0, 2.0, 5.0)],
 	]
-	var glow_col := Color(1.0, 0.88, 0.3) if combo >= 10 else Color(0.35, 0.95, 1.0)
+	var glow_col := Color("dfa56d")
+	var chip_mesh := StoneTablet.make_mesh()
+	var break_origin := st.global_position + Vector3.UP * stone_mesh.size.y * 0.5
 	for d in chip_data:
 		var chip := MeshInstance3D.new()
-		chip.mesh = stone_mesh
-		var cm: ShaderMaterial = stone_material.duplicate()
+		chip.mesh = chip_mesh
+		var cm := ShaderMaterial.new()
+		cm.shader = StoneTablet.SHADER
 		cm.set_shader_parameter("hit_tint", glow_col)
-		cm.set_shader_parameter("hit_strength", 0.75)
+		cm.set_shader_parameter("hit_strength", 0.28)
 		chip.material_override = cm
 		chip.scale = d[1]
-		chip.position = st.global_position + d[0] * 0.5
+		chip.position = break_origin + d[0] * 0.5
 		add_child(chip)
 		var tw := create_tween().set_parallel(true)
-		tw.tween_property(chip, "position", chip.position + d[2], 0.38).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		tw.tween_property(chip, "position", chip.position + d[2] + Vector3(side * 0.4, 0.0, 0.0), 0.38).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		tw.tween_property(chip, "rotation", d[3], 0.38)
 		tw.tween_property(chip, "scale", Vector3.ZERO, 0.18).set_delay(0.20)
 		tw.chain().tween_callback(chip.queue_free)
 
-## Sparks (batch02 sparks_atlas) burst on the 2D fx layer at the stone's screen position.
-func _sparks(at: Vector3) -> void:
-	if cam == null or not cam.is_inside_tree():
-		return
-	var p := CPUParticles2D.new()
-	var t := AtlasTexture.new(); t.atlas = Art.VFX.sparks; t.region = Rect2(0, 0, 64, 64)
-	p.texture = t
-	p.one_shot = true
-	p.explosiveness = 1.0
-	# Keep the hit burst local while the player reads the next row.
-	p.amount = 12
-	p.lifetime = 0.38
-	p.spread = 180.0
-	p.gravity = Vector2.ZERO
-	p.initial_velocity_min = 280.0
-	p.initial_velocity_max = 560.0
-	p.damping_min = 600.0; p.damping_max = 600.0
-	p.angular_velocity_min = -360.0; p.angular_velocity_max = 360.0
-	p.scale_amount_min = 0.5; p.scale_amount_max = 1.0
-	p.position = cam.unproject_position(at)
-	fx_layer.add_child(p)
-	p.emitting = true
-	get_tree().create_timer(1.0).timeout.connect(p.queue_free)
-
-func _fx_wrong(st: MeshInstance3D, right: MeshInstance3D, added_time: float) -> void:
+func _fx_wrong(st: MeshInstance3D, added_time: float) -> void:
 	rumble(0.65, 0.85, 0.3)
 	runner.play_once("hit_wrong")
-	_glow(st, Color(1.0, 0.2, 0.2), 3.0, 0.6)
-	_glow(right, Color(0.3, 1.0, 0.5), 1.5, 0.8)   # show which one was right
+	_glow(st, Color("a55c51"), 1.6, 0.4)
 	var tw := create_tween()
 	tw.tween_property(st, "position", st.position + Vector3(0, 0.3, -1.2), 0.08)
 	tw.tween_property(st, "position", st.position + Vector3(0, 0, -0.8), 0.2)
-	var pt := create_tween()
-	pt.tween_property(player_mesh, "position:z", 0.6, 0.06)
-	pt.tween_property(player_mesh, "position:z", 0.0, 0.25)
-	_glow_player(Color(1.0, 0.2, 0.2), 2.5)
-	_screen_flash(Color(1.0, 0.2, 0.2, 0.16), 0.18)
-	_spawn_shockwave(st.global_position, Color(1.0, 0.25, 0.25), 130.0)
 	sfx("miss", 1.0, 0.0)
-	if bool(cfg.get("feedback", {}).get("screen_shake_on_normal_hit", false)):
-		cam.h_offset = 0.15
 	_float_text(I18n.t("FLOAT_WRONG_TIME", "答錯 %+.1f 秒") % added_time, Color(1.0, 0.35, 0.35))
 	_judge(false)
 
-func _fx_miss(r, added_time: float) -> void:
-	_glow(r.stones[r.target], Color(0.3, 1.0, 0.5), 1.5, 0.8)
+func _fx_miss(added_time: float) -> void:
 	sfx("tick")
 	_float_text("漏答 %+.1f 秒" % added_time, Color(0.8, 0.8, 1.0))
 
-func _glow_player(c: Color, e: float) -> void:
-	player_mat.emission = c
-	player_mat.emission_energy_multiplier = e
-	var tw := create_tween()
-	tw.tween_property(player_mat, "emission_energy_multiplier", 0.0, 0.35)
-
-func _burst(at: Vector3, c: Color) -> void:
-	var p := CPUParticles3D.new()
-	add_child(p)
-	p.global_position = at
-	p.one_shot = true
-	p.amount = 24
-	p.lifetime = 0.5
-	p.explosiveness = 1.0
-	p.direction = Vector3(0, 0.5, -1)
-	p.spread = 70.0
-	p.initial_velocity_min = 6.0
-	p.initial_velocity_max = 12.0
-	p.gravity = Vector3(0, -12, 0)
-	var sm := SphereMesh.new()
-	sm.radius = 0.08; sm.height = 0.16
-	p.mesh = sm
-	var m := _mat(c, true)
-	m.emission_energy_multiplier = 4.0
-	p.material_override = m
-	p.emitting = true
-	get_tree().create_timer(1.0).timeout.connect(p.queue_free)
-
 # ---------------------------------------------------------------- view
 func _update_view(dt: float) -> void:
-	player.position = Vector3(player_x, 0, -player_dist)
-	cam.position = Vector3(player_x * 0.4, 4.1, -player_dist + 7.0)
-	cam.look_at(Vector3(player_x * 0.4, 1.3, -player_dist - 14.0))
-	cam.fov = move_toward(cam.fov, base_fov + ctrl.kmh() * 0.08, 40.0 * dt)
-	cam.h_offset = move_toward(cam.h_offset, 0.0, dt)
-	var g := get_node("Ground") as Node3D
-	g.position.z = -player_dist - 150.0
-	for m in road_mats:
-		m.uv1_offset.y = -fmod(player_dist, float(m.get_meta("tile")) * 100.0) / float(m.get_meta("tile"))
-	_spawn_props()
+	var scene_travel := player_dist * STREET_DISTANCE_SCALE
+	cam.position = Vector3(0.0, STREET_CAMERA_HEIGHT, STREET_CAMERA_DISTANCE - scene_travel)
+	(street_rect.material as ShaderMaterial).set_shader_parameter("travel_m", 0.0 if _reduced_motion() else scene_travel)
+	var art_scale := _layout_street()
+	var view_width := get_viewport().get_visible_rect().size.x
+	var runner_depth := STREET_CAMERA_DISTANCE - RUNNER_FOREGROUND_OFFSET
+	var usable_half_width := view_width * 0.48 * runner_depth / (STREET_FOCAL_PX * art_scale)
+	var pose_half_width: float = Art.RUNNER_CELL.x * runner.px * 0.5
+	var outer_lane := maxf(absf(lane_x(0)), absf(lane_x(lane_count - 1)))
+	# The crop can narrow the presentation of the lanes without squeezing the glyphs.
+	var lane_frame_scale := clampf((usable_half_width - pose_half_width) / maxf(lane_w, outer_lane), 0.6, 1.0)
+	player.position = Vector3(player_x * lane_frame_scale, 0.0, RUNNER_FOREGROUND_OFFSET - scene_travel)
+	for row in rows:
+		if not row.resolved:
+			for i in row.stones.size():
+				row.stones[i].position.x = lane_x(i) * lane_frame_scale
 	if runner != null:
-		runner.position.x = 0.0
-		var lean := clampf((lane_x(lane) - player_x) / lane_w, -1.0, 1.0)
-		runner.rotation.z = 0.0 if runner.anim.begins_with("lane") else -lean * 0.05
-		runner.tick(dt, ctrl.kmh())
-		var target_opacity := 1.0
-		if state == State.RUNNING:
-			var ar = active_row()
-			if ar != null:
-				var dist_to_stone: float = ar.dist - player_dist
-				if dist_to_stone > 3.0 and dist_to_stone < 22.0:
-					for i in ar.kana.size():
-						if absf(player_x - lane_x(i)) < lane_w * 0.65:
-							target_opacity = 0.55
-							break
-		runner_opacity = move_toward(runner_opacity, target_opacity, dt * 5.0)
-		runner.set_opacity(runner_opacity)
-		if runner_trail != null:
-			runner_trail.emitting = state == State.RUNNING and ctrl.kmh() > 6.0
-			if runner_trail.emitting:
-				var spd_ratio := clampf(ctrl.kmh() / 40.0, 0.5, 1.8)
-				runner_trail.initial_velocity_min = 1.5 * spd_ratio
-				runner_trail.initial_velocity_max = 3.5 * spd_ratio
-		if speedlines_mat != null:
-			var kmh := ctrl.kmh()
-			var target_intensity := 0.0
-			if state == State.RUNNING and kmh > 24.0:
-				target_intensity = clampf((kmh - 24.0) / 36.0, 0.0, 1.0)
-			speedlines_intensity = move_toward(speedlines_intensity, target_intensity, dt * 3.5)
-			speedlines_mat.set_shader_parameter("intensity", speedlines_intensity)
-			if ctrl.locked:
-				speedlines_mat.set_shader_parameter("line_color", Color(0.35, 1.0, 0.88, 0.82))
-			else:
-				speedlines_mat.set_shader_parameter("line_color", Color(0.5, 0.92, 1.0, 0.75))
-			if cam != null and is_instance_valid(cam):
-				var vp: Vector2 = cam.unproject_position(Vector3(player_x * 0.4, 1.2, -player_dist - 20.0))
-				var view_sz: Vector2 = get_viewport().get_visible_rect().size
-				if view_sz.x > 0.0 and view_sz.y > 0.0:
-					speedlines_mat.set_shader_parameter("center", vp / view_sz)
+		if state != State.PAUSED:
+			runner.tick(dt, ctrl.kmh())
 		if state == State.RUNNING:
 			var target_idle := ctrl.kmh() < 1.0
 			if ctrl.is_braking() and ctrl.speed > 0.2:
 				if runner.anim != "brake" and not runner.is_one_shot():
-					runner.play_once("brake", 0, true)
+					runner.play_once("brake", true)
 			else:
 				if runner.is_one_shot() and runner.anim == "brake":
 					runner.release_hold("idle" if target_idle else "run")
@@ -6041,47 +5714,37 @@ func _update_view(dt: float) -> void:
 			if runner.is_one_shot() and runner.anim == "brake":
 				runner.release_hold("idle")
 			runner.set_loop("idle")
-	# horizon line of the 3D camera -> place the 2D skyline on it
-	var vs: Vector2 = get_viewport().get_visible_rect().size
-	var pitch := atan2(cam.position.y - 1.3, 21.0)
-	var hy := vs.y * (0.5 - 0.5 * tan(pitch) / tan(deg_to_rad(cam.fov) * 0.5))
-	var fh := vs.x * 420.0 / 2160.0 * 1.6
-	var k := fh / 420.0
-	far_rect.scale = Vector2(k, k)
-	far_rect.size = Vector2(vs.x * 2.0 / k, 420.0)
-	far_rect.position = Vector2(-fmod(player_x * 6.0 + 1000.0, 2160.0 * k) - vs.x * 0.2, hy - fh + 6.0)
-	petals.emission_rect_extents = Vector2(vs.x * 0.6, 10)
-	petals.position = Vector2(vs.x * 0.5, -20)
-	_tick_shield_fx(dt)
 
 func _update_hud() -> void:
 	var tutorial := is_tutorial_active()
 	var running := state == State.RUNNING and not tutorial
-	var race_stats := running or (state == State.PAUSED and not tutorial)
 	for stat in [timer_panel, lbl_count, hearts_box]:
-		stat.visible = race_stats
+		stat.visible = running
 	_refresh_hp_bar()
 	shield_box.visible = running and not shield_thresholds.is_empty()
 	if shield_box.visible:
 		lbl_boss.text = (I18n.t("HUD_SHIELD_CHAIN", "護盾・連對 %d/%d") % [break_progress, break_chain]) if boss_shield_up else (I18n.t("HUD_SHIELD_BROKEN_CNT", "護盾・已破 %d/%d") % [shields_broken, shield_thresholds.size()])
-		shield_box.self_modulate = Color("ffc87f") if boss_shield_up else Color.WHITE
+		lbl_boss.add_theme_color_override("font_color", AMBER if boss_shield_up else MUTED)
 	combo_badge.visible = running and not lbl_combo.text.is_empty()
+	lbl_listen.visible = running
+	lbl_hint.visible = running
 	lbl_notice.visible = running
 	lbl_float.visible = running
 	judge.visible = running
 	ready_box.visible = state == State.READY and not tutorial
-	sel_bg.visible = select_box.visible or settings_box.visible or (shop_box != null and shop_box.visible) or (achievements_box != null and achievements_box.visible) or (endless_box != null and endless_box.visible)
+	menu_shade.visible = title_box.visible or results_box.visible or review_box.visible or chart_box.visible or select_box.visible or settings_box.visible or (shop_box != null and shop_box.visible) or (achievements_box != null and achievements_box.visible) or (endless_box != null and endless_box.visible)
 	go_box.visible = running and clock() < 0.5
-	res_bg.visible = (results_box.visible or review_box.visible) and not sel_bg.visible
 	var playing := state == State.RUNNING or state == State.READY
+	var road_visible := playing or state == State.PAUSED
+	player.visible = road_visible
+	for row in rows:
+		row.node.visible = road_visible
 	for b in [btn_accel, btn_brake]:
 		b.visible = playing
 	btn_pause.visible = state == State.RUNNING
 	btn_voice.visible = state == State.RUNNING
 	btn_lock.visible = running and speed_mode == "race"
-	speedo.visible = (playing or state == State.PAUSED) and not tutorial
-	var speed_fraction := clampf(ctrl.speed / ctrl.max_speed, 0.0, 1.0) if ctrl.max_speed > 0.0 else 0.0
-	speedo_needle.rotation_degrees = lerpf(-135.0, 135.0, speed_fraction)
+	speedo.visible = playing and not tutorial
 	lbl_lock_kmh.text = ("%d" % roundi(ctrl.lock_kmh())) if ctrl.locked else ""
 	_set_btn_lit(btn_lock, ctrl.locked)
 	_set_btn_lit(btn_accel, ctrl.is_accelerating())
